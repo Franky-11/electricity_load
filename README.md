@@ -41,17 +41,10 @@ requirements.txt
 ## 🧠 Modelle & Metriken
 
 **Baselines:**
-- `naive`  
-  $$
-  \hat{y}_{t+h} = y_t
-  $$
-- `seasonal_naive(m)`  
-  $$
-  \hat{y}_{t+h} = y_{t+h-m}
-  $$
+- `naive` → $\hat{y}_{t+h} = y_t$
+- `seasonal_naive(m)` → $\hat{y}_{t+h} = y_{t+h-m}$
 
-
-- **SARIMA** (optional): kleiner, stabiler Suchraum mit saisonaler Woche (`m=168`); exog: Wochenende/Feiertag.
+- **SARIMA** (optional):  order (1,0,0) x seasonal_order (0,1,0,168) ; exog: Wochenende/Feiertag.
 - **Metriken:**
   - **MAE** 
   - **sMAPE** 
@@ -75,3 +68,10 @@ Szenarien ändern **Historie** nachträglich:
 > **Interpretation:** Δ‑KPIs zeigen **Peak‑Reduktion** (MW) & **Energie‑Δ** (MWh). Ergebnisse sind **Simulationen**, keine Prognosen.
 
 ---
+
+## 📜 Lizenz
+Code: MIT – siehe LICENSE.
+
+Open Power System Data. 2020. Data Package Time series. Version 2020‑10‑06. https://doi.org/10.25832/time_series/2020-10-06
+
+

@@ -9,15 +9,23 @@ import streamlit as st
 
 @st.cache_data()
 def load_csv():
-    PATH = "time_series_60min_singleindex.csv"
-    DATE_COL, Y_COL = "utc_timestamp", "DE_load_actual_entsoe_transparency"
+    PATH = "DE_load_actual_entsoe_transparency.csv"
+    DATE_COL, Y_COL = "timestamp", "DE_load_actual_entsoe_transparency"
     FREQ = "h"
     # 1) Laden & sortieren
     df=pd.read_csv(PATH,parse_dates=[DATE_COL]).sort_values(DATE_COL)
     s=df.set_index(DATE_COL)[Y_COL]
+    s.index = pd.to_datetime(s.index, errors="raise")  # aus generischem Index -> DatetimeIndex
 
-    # 2) Zeitzone konsistent: Europe/Berlin
-    s.index = s.index.tz_convert("Europe/Berlin")
+    if s.index.tz is None:
+        # -> lokale Berlin-Zeit ohne TZ: sauber lokalisieren (DST!)
+        s.index = s.index.tz_localize("Europe/Berlin",
+                                      ambiguous="infer",  # doppelte Stunde im Herbst
+                                      nonexistent="shift_forward")  # fehlende Stunde im Frühjahr
+    else:
+        # -> bereits tz-aware (z.B. UTC+01:00): nach Berlin konvertieren
+        s.index = s.index.tz_convert("Europe/Berlin")
+
 
     # 3) Feste Frequenz setzen (wichtig für Saisonmuster) und Nan entfernen (nur einer)
     s = s.asfreq(FREQ)

@@ -41,7 +41,7 @@ requirements.txt
 ## 🧠 Modelle & Metriken
 
 - **Baselines:**
-  - `naive`  → - `naive` → $\hat{y}_{t+h} = y_t$
+  - `naive`  → $\hat{y}_{t+h} = y_t$
   - `seasonal_naive(m)`  → $\hat{y}_{t+h} = y_{t+h-m}$
   - `drift`  → trend per letzter Änderung
 - **SARIMA** (optional): kleiner, stabiler Suchraum mit saisonaler Woche (`m=168`); exog: Wochenende/Feiertag.

@@ -80,7 +80,7 @@ if compare_prev:
 
 #===========================================================================#
 
-st.title("⚡ Stromlastdaten Deuschland")
+st.title("⚡ Stromlastdaten Deutschland")
 welcome,eda,forecast=st.tabs(["Home","EDA","Forecast"])
 
 with welcome:

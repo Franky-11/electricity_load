@@ -99,8 +99,10 @@ with welcome:
             - **Backtesting & Forecasting** 24h Vorhersage der Lastdaten & Vergleich verschiedener Modelle
 
             **Datensatz:**  
-            Open Power System Data – *Time Series (2020-10-06)*  
-            👉 [https://data.open-power-system-data.org/time_series/2020-10-06](https://data.open-power-system-data.org/time_series/2020-10-06)
+            Open Power System Data. 2020. Data Package Time series. Version 2020‑10‑06. 
+           👉  https://doi.org/10.25832/time_series/2020-10-06
+                
+            
             """
         )
 

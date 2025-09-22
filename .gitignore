@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Envs / IDE
+.venv/
+.env
+.vscode/
+.idea/
+
+

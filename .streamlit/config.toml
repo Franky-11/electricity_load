@@ -1,0 +1,7 @@
+[theme]
+base = "dark"
+primaryColor = "#25DCD1"
+backgroundColor = "#000000"          # App-Hintergrund
+secondaryBackgroundColor = "#0f1c2e" # Sidebar/Karten
+textColor = "#FFFFFF"                # hoher Kontrast
+font = "sans serif"

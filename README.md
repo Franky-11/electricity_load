@@ -56,7 +56,7 @@ requirements.txt
 
 ## 🧪 What‑if‑Szenarien (Post‑Processing)
 
-Szenarien ändern **Forecasts oder Historie** nachträglich (keine Modell‑Refits):
+Szenarien ändern **Historie** nachträglich:
 
 - **Holiday/Weekend‑Multiplikator**: skaliert nur diese Tage.
 - **Load‑Shift**: verschiebt x% von Peak‑ in Off‑Peak‑Stunden (Energieerhaltung pro Tag).

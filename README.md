@@ -42,7 +42,7 @@ requirements.txt
 
 - **Baselines:**
   - `naive`  → $\hat{y}_{t+h} = y_t$
-  - `seasonal_naive(m)`  → $\hat{y}_{t+h} = y_{t+h-m}$
+  - `seasonal_naive(m)` → $\hat{y}_{t+h} = y_{t+h-m}$
   - `drift`  → trend per letzter Änderung
 - **SARIMA** (optional): kleiner, stabiler Suchraum mit saisonaler Woche (`m=168`); exog: Wochenende/Feiertag.
 - **Metriken:**

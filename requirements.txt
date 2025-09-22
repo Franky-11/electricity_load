@@ -6,3 +6,4 @@ scikit-learn>=1.5
 statsmodels>=0.14
 holidays>=0.50
 streamlit>=1.36
+requests

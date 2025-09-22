@@ -1,15 +1,7 @@
 # Stromlast‑Forecast DE
 > Interaktive Web‑App für **EDA**, **Baselines/Backtesting**, optional **SARIMA(+exog)** und **What‑if‑Szenarien** auf **stündlichen** Stromlastdaten (TZ: *Europe/Berlin*).
 
----
 
-## 🔗 Live‑App
-
-Füge hier deinen Link ein (z. B. Streamlit Community Cloud):
-
-**App:** https://stromviz.streamlit.app
-
----
 
 ## ✨ Features
 
@@ -72,6 +64,7 @@ Szenarien ändern **Historie** nachträglich:
 ## 📜 Lizenz
 Code: MIT – siehe LICENSE.
 
+Datensatz:
 Open Power System Data. 2020. Data Package Time series. Version 2020‑10‑06. https://doi.org/10.25832/time_series/2020-10-06
 
 

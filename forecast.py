@@ -9,7 +9,7 @@ import streamlit as st
 
 @st.cache_data()
 def load_csv():
-    PATH = "../time_series_60min_singleindex.csv"
+    PATH = "time_series_60min_singleindex.csv"
     DATE_COL, Y_COL = "utc_timestamp", "DE_load_actual_entsoe_transparency"
     FREQ = "h"
     # 1) Laden & sortieren

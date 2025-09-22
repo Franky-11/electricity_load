@@ -7,6 +7,7 @@ from holidays import Germany
 
 from forecast import*
 from scenarios import*
+from smard_data import load_smard_api
 
 pio.templates.default = "plotly_dark"
 
@@ -15,14 +16,34 @@ st.set_page_config(layout="wide")
 
 st.sidebar.header("EDA")
 
+
+
+show_holidays = st.sidebar.checkbox("Feiertage markieren", value=True)
+
+# ---------- Vorjahres-Vergleich (Checkbox) ----------
+compare_prev = st.sidebar.checkbox("Mit Vorjahr vergleichen (gleicher Zeitraum)", value=False)  # ← NEU
+
+# Auswahl anwenden (datumsgenau inkl. Endtag)
+
+# EDA für stündliche Serie s (tz=Europe/Berlin, freq="h"
+s=load_smard_api(years=2)
+df = s.to_frame("y")
+idx=df.index
+
+df["dow"]=idx.dayofweek
+df["hour"]=idx.hour
+de_hol= Germany(years=range(idx.year.min(), idx.year.max() + 1))
+df["is_hol"]=pd.Series(idx.date,index=idx).map(lambda d: d in de_hol)
+df["h_w"] = df["dow"]*24 + df["hour"]
+df["month"]=idx.month
 # ---------- Sidebar: Datumsbereich ----------
-min_date = "2015-01-01"
-max_date = "2020-10-01"
+min_date = df.index.date.min()
+max_date = df.index.date.max()
 
 st.sidebar.markdown("**Zeitraum**")
 date_range = st.sidebar.date_input(
     "Von ... bis ... (inklusive)",
-    value=("2019-01-01", "2020-10-01"),
+    value=(min_date, max_date),
     min_value=min_date,
     max_value=max_date)
 
@@ -37,26 +58,6 @@ if start_date > end_date:
     st.sidebar.warning("Startdatum > Enddatum – ich habe es getauscht.")
     start_date, end_date = end_date, start_date
 
-show_holidays = st.sidebar.checkbox("Feiertage markieren", value=True)
-
-# ---------- Vorjahres-Vergleich (Checkbox) ----------
-compare_prev = st.sidebar.checkbox("Mit Vorjahr vergleichen (gleicher Zeitraum)", value=False)  # ← NEU
-
-# Auswahl anwenden (datumsgenau inkl. Endtag)
-
-# EDA für stündliche Serie s (tz=Europe/Berlin, freq="h"
-s=load_csv()
-df = s.to_frame("y")
-idx=df.index
-
-df["dow"]=idx.dayofweek
-df["hour"]=idx.hour
-de_hol= Germany(years=range(idx.year.min(), idx.year.max() + 1))
-df["is_hol"]=pd.Series(idx.date,index=idx).map(lambda d: d in de_hol)
-df["h_w"] = df["dow"]*24 + df["hour"]
-df["month"]=idx.month
-
-
 
 mask = (df.index.date >= start_date) & (df.index.date <= end_date)
 df_view = df.loc[mask].copy()
@@ -65,9 +66,9 @@ df_view = df.loc[mask].copy()
 prev_info = ""
 df_prev = pd.DataFrame(columns=df.columns)
 if compare_prev:
-    tz = "Europe/Berlin"
-    start_ts = pd.Timestamp(start_date, tz=tz)
-    end_ts = pd.Timestamp(end_date, tz=tz)
+
+    start_ts = pd.Timestamp(start_date )
+    end_ts = pd.Timestamp(end_date)
     prev_start = (start_ts - pd.DateOffset(years=1)).date()
     prev_end = (end_ts - pd.DateOffset(years=1)).date()
     mask_prev = (df.index.date >= prev_start) & (df.index.date <= prev_end)
@@ -80,17 +81,18 @@ if compare_prev:
 
 #===========================================================================#
 
-st.title("⚡ Stromlastdaten Deutschland")
+st.title("⚡ Stromverbrauch Deutschland")
 welcome,eda,forecast=st.tabs(["Home","EDA","Forecast"])
 
 with welcome:
     left,space, right = st.columns([1.25,0.2, 1])
     st.write("")
     with left:
+        abruf=pd.Timestamp.now().strftime("%Y-%m-%d")
         st.subheader("Willkommen! 👋")
         st.markdown(
-            """
-            **Diese App** zeigt Trend, Wochenmuster und saisonale Mittelwerte für die deutsche Stromlast
+            f"""
+            **Diese App** zeigt Trend, Wochenmuster und saisonale Mittelwerte für den deutschen Stromverbrauch
 
             **Features**
             - Zeitraum in der Sidebar wählen (inkl. Vorjahresvergleich).
@@ -99,9 +101,7 @@ with welcome:
             - **Backtesting & Forecasting** 24h Vorhersage der Lastdaten & Vergleich verschiedener Modelle
 
             **Datensatz:**  
-            Open Power System Data. 2020. Data Package Time series. Version 2020‑10‑06. 
-           👉  https://doi.org/10.25832/time_series/2020-10-06
-                
+            Daten: Bundesnetzagentur | SMARD.de – Bereich „Stromverbrauch: Gesamt (Netzlast)“, Region DE, Abruf: {abruf}, Lizenz: CC BY 4.0.
             
             """
         )
@@ -111,7 +111,6 @@ with welcome:
 
 with eda:
     # 1) Trendblick
-
 
     st.subheader("Trend & Wochenmuster (EDA)")
     st.caption(f"TZ: Europe/Berlin · freq=H · Auswahl: {start_date} bis {end_date}{prev_info}")
@@ -139,7 +138,7 @@ with eda:
     title="Serie + Rolling Means + Feiertage",
     height=380, hovermode="x unified", margin=dict(l=40, r=20, t=60, b=30),
     )
-    fig1.update_yaxes(title_text="total load (MW)")
+    fig1.update_yaxes(title_text="Verbrauch MWh")
 
     st.plotly_chart(fig1, use_container_width=True)
 
@@ -166,7 +165,7 @@ with eda:
         fig2.update_layout(title="Mittelwert je Stunde der Woche (0..167)",
                            height=320, margin=dict(l=40, r=20, t=60, b=30), hovermode="x unified",
                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
-        fig2.update_yaxes(title_text="total load (MW)")
+        fig2.update_yaxes(title_text="Verbrauch MWh je Stunde")
         st.plotly_chart(fig2, use_container_width=True)
 
     with col2:
@@ -187,7 +186,7 @@ with eda:
 
         fig3.update_layout(title="Mittelwert je Wochentag", barmode="group",
                            height=320, margin=dict(l=40, r=20, t=60, b=30))
-        fig3.update_yaxes(title_text="total load (MW)")
+        fig3.update_yaxes(title_text="Verbrauch MWh je Stunde")
         st.plotly_chart(fig3, use_container_width=True)
 
     with col3:
@@ -209,7 +208,7 @@ with eda:
 
         fig4.update_xaxes(tickmode="array", tickvals=xmonths, ticktext=month_names)
         fig4.update_layout(title="Mittelwert je Monat", height=320, margin=dict(l=40, r=20, t=60, b=30))
-        fig4.update_yaxes(title_text="total load (MW)")
+        fig4.update_yaxes(title_text="Verbrauch MWh je Stunde")
         st.plotly_chart(fig4, use_container_width=True)
 
 
@@ -246,14 +245,15 @@ with forecast:
                 st.caption("order (1,0,0) x seasonal_order (0,1,0,168)")
                 st.dataframe(df_sarimax)
         else:
-            st.markdown("**SARIMA + exog. Features** | 90 Tage Trainingsfenster, 30 Tage Validierung")
-            df_sarimax=pd.DataFrame([[987,1.9,0.75,95.2]],columns=["MAE","sMAPE (%)","MASE_168","coverage PI (%)"])
-            st.caption("order (1,0,0) x seasonal_order (0,1,0,168) ")
-            st.dataframe(df_sarimax,hide_index=True)
+           st.markdown("Letzte Validierung **SARIMA + exog. Features**")
+           df_sarimax=pd.DataFrame([[645,1.5,0.29,95.2]],columns=["MAE","sMAPE (%)","MASE_168","coverage PI (%)"])
+           st.caption("order (1,0,0) x seasonal_order (0,1,0,168) ")
+           st.caption("Validierung am 22.09.2025 | 90 Tage Trainingsfenster, 30 Tage Validierung")
+           st.dataframe(df_sarimax,hide_index=True)
 
         last_week_fc = s_naive(s, h=24, m=168)
         last_24h_fc = s_naive(s, h=24, m=24)
-        sarima_pred=load_sarima_pred()
+        #sarima_pred=load_sarima_pred()
 
         # Nur die letzten 3 Tage der historischen Daten für den Plot nehmen
         hist = df.iloc[-3 * 24:]
@@ -266,24 +266,24 @@ with forecast:
         fig5.add_trace(go.Scatter(x=last_week_fc.index, y=last_week_fc.values, name="naive_168h", mode="lines"))
 
         # Sarima Forecast aus csv
-        fig5.add_trace(go.Scatter(x=sarima_pred.index, y=sarima_pred["yhat"], name="SARIMA", mode="lines",line=dict(color="white", width=2, dash="solid")))
+       # fig5.add_trace(go.Scatter(x=sarima_pred.index, y=sarima_pred["yhat"], name="SARIMA", mode="lines",line=dict(color="white", width=2, dash="solid")))
         # 1) Prediction-Band
-        fig5.add_trace(go.Scatter(
-            x=sarima_pred.index, y=sarima_pred["lo"],
-            mode='lines',
-            line=dict(width=0),  # keine sichtbare Linie unten
-            showlegend=False,
-            hoverinfo='skip',
-            name='PI lower'
-        ))
-        fig5.add_trace(go.Scatter(
-            x=sarima_pred.index, y=sarima_pred["hi"],
-            mode='lines',
-            line=dict(width=0),
-            fill='tonexty',  # füllt bis zum vorherigen Trace (y_lower)
-            fillcolor='rgba(211, 211, 211, 0.5)',  # halbtransparent
-            name='Prediction interval SARIMA'
-        ))
+        #fig5.add_trace(go.Scatter(
+          #  x=sarima_pred.index, y=sarima_pred["lo"],
+         #   mode='lines',
+         #   line=dict(width=0),  # keine sichtbare Linie unten
+         #   showlegend=False,
+         #   hoverinfo='skip',
+         #   name='PI lower'
+      #  ))
+       # fig5.add_trace(go.Scatter(
+        #    x=sarima_pred.index, y=sarima_pred["hi"],
+        #    mode='lines',
+        #    line=dict(width=0),
+        #    fill='tonexty',  # füllt bis zum vorherigen Trace (y_lower)
+        #    fillcolor='rgba(211, 211, 211, 0.5)',  # halbtransparent
+        #    name='Prediction interval SARIMA'
+        #))
 
 
         forecast_start_time = last_24h_fc.index[0]
@@ -322,7 +322,7 @@ with forecast:
     #Szenarien
     st.divider()
     st.subheader("🔬 Szenario-Simulation (What-if)")
-    rng = st.date_input("Historienfenster", ["2020-01-01", "2020-01-31"])
+    rng = st.date_input("Historienfenster", [start_date, end_date])
     if isinstance(rng, tuple) and len(rng) == 2:
         start_date, end_date = rng
     else:

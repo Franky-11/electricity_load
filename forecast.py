@@ -4,33 +4,7 @@ import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import holidays
 import streamlit as st
-
-
-
-@st.cache_data()
-def load_csv():
-    PATH = "DE_load_actual_entsoe_transparency.csv"
-    DATE_COL, Y_COL = "timestamp", "DE_load_actual_entsoe_transparency"
-    FREQ = "h"
-    # 1) Laden & sortieren
-    df=pd.read_csv(PATH,parse_dates=[DATE_COL]).sort_values(DATE_COL)
-    s=df.set_index(DATE_COL)[Y_COL]
-    s.index = pd.to_datetime(s.index, errors="raise")  # aus generischem Index -> DatetimeIndex
-
-    if s.index.tz is None:
-        # -> lokale Berlin-Zeit ohne TZ: sauber lokalisieren (DST!)
-        s.index = s.index.tz_localize("Europe/Berlin",
-                                      ambiguous="infer",  # doppelte Stunde im Herbst
-                                      nonexistent="shift_forward")  # fehlende Stunde im Frühjahr
-    else:
-        # -> bereits tz-aware (z.B. UTC+01:00): nach Berlin konvertieren
-        s.index = s.index.tz_convert("Europe/Berlin")
-
-
-    # 3) Feste Frequenz setzen (wichtig für Saisonmuster) und Nan entfernen (nur einer)
-    s = s.asfreq(FREQ)
-    s.dropna(inplace=True)
-    return s
+import json
 
 
 def smape(y, yhat):
@@ -170,3 +144,46 @@ def kpi_card(title: str, value: float, unit: str = "", icon: str = "⚡", footno
       {f'<div class="kpi-foot">{footnote}</div>' if footnote else ''}
     </div>
     """, unsafe_allow_html=True)
+
+
+
+def refit_predict_pi(s, H=24, win_days=90, m=168, alpha=0.05):
+    y = s.asfreq("H")
+    if y.index.tz is not None: y = y.tz_convert("UTC").tz_localize(None)
+    tr = y.tail(24*win_days).ffill()
+    idx_f = pd.date_range(y.index[-1]+pd.Timedelta(hours=1), periods=H, freq="h")
+
+    def exog(idx):
+        loc = idx.tz_localize("UTC").tz_convert("Europe/Berlin")
+        yrs = range(loc.min().year, loc.max().year+1); hol = holidays.Germany(years=yrs)
+        X = pd.DataFrame(index=idx)
+        X["is_weekend"] = (loc.dayofweek>=5).astype(int)
+        X["is_hol"] = pd.Series(loc.date, index=idx).map(lambda d: d in hol).astype(int)
+        return X
+
+    res = SARIMAX(tr, order=(1,0,0), seasonal_order=(0,1,0,m),
+                  exog=exog(tr.index), enforce_stationarity=False,
+                  enforce_invertibility=False).fit(disp=False, maxiter=200)
+
+    fc = res.get_forecast(H, exog=exog(idx_f))
+    yhat = pd.Series(np.asarray(fc.predicted_mean), index=idx_f)
+    pi = fc.conf_int(alpha=alpha); pi.columns = ["lo","hi"]; pi.index = idx_f
+    return yhat, pi, res
+
+
+
+def save_model(res):
+    res.save("sarima.pkl", remove_data=True)  # << klein & schnell
+    # Optional: Metadaten
+
+    today=pd.Timestamp.today().date()
+    meta = {
+        "model_name": "SARIMA",
+        "order":       list(res.model.order),
+        "seasonal_order": list(res.model.seasonal_order),
+        "trained_range": [str(res.model.data.row_labels[0]),
+                          str(res.model.data.row_labels[-1])],
+        "last_train":today,
+        "notes": "Saved with remove_data=True"
+    }
+    json.dump(meta, open("sarima_meta.json","w"), indent=2)

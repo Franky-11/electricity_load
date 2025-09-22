@@ -65,6 +65,10 @@ Szenarien ändern **Historie** nachträglich:
 Code: MIT – siehe LICENSE.
 
 Datensatz:
-Open Power System Data. 2020. Data Package Time series. Version 2020‑10‑06. https://doi.org/10.25832/time_series/2020-10-06
+- **Quelle:** SMARD – Strommarktdaten der Bundesnetzagentur, Bereich *Stromverbrauch: Gesamt (Netzlast)*, Region **DE**, Auflösung **Stunde**.  
+- **Lizenz:** **Creative Commons CC BY 4.0** 
+- **Empfohlene Attribution:** **„Bundesnetzagentur | SMARD.de“**.  
+
+
 
 

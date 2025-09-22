@@ -36,7 +36,6 @@ forecast.py    # Daten‑Loader, Baselines, Walk‑Forward, Metriken, (optionale
 scenarios.py   # What‑if‑Helperfunktionen (Holiday/Weekend, Shift, Temp, Effizienz, Event, PV/Wind)
 requirements.txt
 ```
-
 ---
 
 ## 🧠 Modelle & Metriken

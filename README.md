@@ -7,7 +7,7 @@
 
 Füge hier deinen Link ein (z. B. Streamlit Community Cloud):
 
-**App:** https\://\<DEIN‑APP‑LINK>
+**App:** https://stromviz.streamlit.app/
 
 ---
 

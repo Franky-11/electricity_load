@@ -46,9 +46,9 @@ requirements.txt
   - `drift`  → trend per letzter Änderung
 - **SARIMA** (optional): kleiner, stabiler Suchraum mit saisonaler Woche (`m=168`); exog: Wochenende/Feiertag.
 - **Metriken:**
-  - **MAE** (robust),
-  - **sMAPE** (prozentual; Achtung bei Werten \~0),
-  - **MASE‑168h** (vergleichbar über Skalen).
+  - **MAE** 
+  - **sMAPE** 
+  - **MASE‑168h** 
 
 
 

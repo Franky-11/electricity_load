@@ -1,15 +1,15 @@
 # Stromlast‑Forecast DE
 > Interaktive Web‑App für **EDA**, **Baselines/Backtesting**, optional **SARIMA(+exog)** und **What‑if‑Szenarien** auf **stündlichen** Stromlastdaten (TZ: *Europe/Berlin*).
 
-
+**App**: https://stromviz.streamlit.app/
 
 ## ✨ Features
 
 - **EDA**: Zeitraumwahl, Feiertags‑Overlay, optional Vorjahresvergleich; Linien‑ & Wochenmusterplots.
 - **Baselines & Backtesting**: Naive / Seasonal‑Naive (m=24/168) / Drift; Walk‑Forward mit fixem Horizont.
 - **Metriken**: **MAE**, **sMAPE**, **MASE (168h)**.
-- **SARIMA (+exogene Kalender‑Features)**: optional, inkl. (Beispiel‑)PI‑Bänder via CSV.
-- **What‑if Szenarien** (Post‑Processing, extrem schnell):
+- **SARIMA (+exogene Kalender‑Features)**: optional.
+- **What‑if Szenarien** (Post‑Processing):
   - Feiertag/Weekend‑Multiplikator,
   - Peak→Off‑Peak‑Verschiebung (Demand Response),
   - Temperatur‑Sensitivity (linear),

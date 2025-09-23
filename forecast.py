@@ -2,10 +2,6 @@ from sklearn.metrics import mean_absolute_error
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.statespace.sarimax import SARIMAXResults
-from statsmodels.tsa.statespace.kalman_filter import (
-    MEMORY_NO_FORECAST_MEAN, MEMORY_NO_FORECAST_COV,
-    MEMORY_NO_PREDICTED, MEMORY_NO_FILTERED, MEMORY_NO_SMOOTHING)
 
 import holidays
 import streamlit as st

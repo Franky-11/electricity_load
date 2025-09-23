@@ -394,6 +394,8 @@ with forecast:
     if "qcheck" not in st.session_state:
         st.session_state["qcheck"]=False
 
+    spec=spec if st.session_state["refit"] else json.load(open("sarima_spec.json","r"))
+
     st.divider()
     st.subheader("📏 Qualitätscheck")
     st.badge("Backtesting letzten Tage: Filter-Forecast mit aktuellen Parametern (kein Re-Fit)")

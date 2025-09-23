@@ -24,9 +24,10 @@
 
 ```
 app.py         # UI: Sidebar (EDA, Backtesting), Forecast‑Tab, Szenario‑Panel, KPIs
-forecast.py    # Daten‑Loader, Baselines, Walk‑Forward, Metriken, (optionales) SARIMA
+forecast.py    # Baselines, Walk‑Forward, Metriken, (optionales) SARIMA
 scenarios.py   # What‑if‑Helperfunktionen (Holiday/Weekend, Shift, Temp, Effizienz, Event, PV/Wind)
-requirements.txt
+smard_data.py  # Daten‑Loader für SMARD
+
 ```
 ---
 

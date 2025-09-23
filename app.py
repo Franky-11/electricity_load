@@ -82,7 +82,7 @@ if compare_prev:
 #===========================================================================#
 
 st.title("⚡ Stromverbrauch Deutschland")
-welcome,eda,forecast=st.tabs(["Home","EDA","Forecast"])
+welcome,eda,forecast,scenarios=st.tabs(["Home","EDA","Forecast","Szenarien"])
 
 with welcome:
     left,space, right = st.columns([1.25,0.2, 1])
@@ -230,95 +230,219 @@ with forecast:
     if submit:
         st.session_state["backtesting"] = True
 
-    if st.session_state.get("backtesting", False):
+    #if st.session_state.get("backtesting", False):
 
         ph.write("")
         with st.spinner("Walk-Forward Backtesting Baslines..."):
             df_base = eval_baselines(s, H=24, m=24, win_days=win_days, eval_days=eval_days)
-            st.markdown(f"**Baselines** | {win_days} Tage Trainingsfenster, {eval_days} Tage Validierung")
+            st.markdown(f"**Baselines** | {eval_days} Tage Validierung")
             st.dataframe(df_base)
         if with_sarimax:
             with st.spinner("Walk-Forward Backtesting SARIMA..."):
-                df_sarimax = eval_sarimax_rolling90_fast(s, H=24, window_days=win_days, days_to_eval=eval_days,
+                df_sarimax= eval_sarimax_rolling90_fast(s, H=24, window_days=win_days, days_to_eval=eval_days,
                                                          step_hours=24)
-                st.markdown(f"**SARIMA + exog. Features** | {win_days}Tage Trainingsfenster, {eval_days} Tage Validierung")
-                st.caption("order (1,0,0) x seasonal_order (0,1,0,168)")
-                st.dataframe(df_sarimax)
+
+                meta = {
+                    "validated_at": pd.Timestamp.now(tz="Europe/Berlin").strftime("%Y-%m-%d %H:%M"),
+                    "order": "(1,0,0)", "seasonal_order": f"(0,1,0,{168})",
+                    "train_window_days": int(win_days), "eval_days": int(eval_days), "H": 24
+                }
+                # lokal schreiben (persistiert lokal; in Cloud bis Neustart)
+                try:
+                    save_validation_json(df_sarimax, meta)
+                except Exception as e:
+                    st.warning(f"Speicherung fehlgeschlagen: {e}")
+
+
+                # auch im RAM behalten (für die aktuelle Session)
+                st.session_state["last_val_df"] = df_sarimax
+                st.session_state["last_val_meta"] = meta
+
+                st.markdown(f"**SARIMA + exog. Features** | {win_days}T Train, {eval_days}T Val")
+                st.caption(f"Validierung am {meta['validated_at']} | order (1,0,0) × (0,1,0,168)")
+                st.dataframe(df_sarimax, hide_index=True)
+
         else:
-           st.markdown("Letzte Validierung **SARIMA + exog. Features**")
-           df_sarimax=pd.DataFrame([[645,1.5,0.29,95.2]],columns=["MAE","sMAPE (%)","MASE_168","coverage PI (%)"])
-           st.caption("order (1,0,0) x seasonal_order (0,1,0,168) ")
-           st.caption("Validierung am 22.09.2025 | 90 Tage Trainingsfenster, 30 Tage Validierung")
-           st.dataframe(df_sarimax,hide_index=True)
+            st.markdown("Letzte Validierung **SARIMA + exog. Features**")
+            if "last_val_df" in st.session_state:
+                df_sarimax = st.session_state["last_val_df"]
+                meta = st.session_state.get("last_val_meta", {})
+            else:
+                try:
+                    df_sarimax, meta = load_validation_json()  # aus artifacts/...
+                except FileNotFoundError:
+                    # Fallback: ein kleiner Platzhalter
+                    df_sarimax = pd.DataFrame([[645, 1.5, 0.29, 95.2]],
+                                              columns=["MAE", "sMAPE (%)", "MASE_168", "coverage PI (%)"])
+                    meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90,
+                            "eval_days": 30}
 
-        last_week_fc = s_naive(s, h=24, m=168)
-        last_24h_fc = s_naive(s, h=24, m=24)
-        #sarima_pred=load_sarima_pred()
+            st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | "
+                       f"{meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | "
+                       f"{meta.get('validated_at', '(kein Zeitstempel)')}")
+            st.dataframe(df_sarimax, hide_index=True)
 
-        # Nur die letzten 3 Tage der historischen Daten für den Plot nehmen
-        hist = df.iloc[-3 * 24:]
+    st.divider()
+    #============Forecasting================================================#
 
-        # Plot erstellen
-        fig5 = px.area(hist, x=hist.index, y="y", title="Forecast 24h vs. Historie")
+    st.subheader("Forecast 24h ahead")
+    last_week_fc = s_naive(s, h=24, m=168)
+    last_24h_fc = s_naive(s, h=24, m=24)
+    # sarima_pred=load_sarima_pred()
 
-        # Traces für die Forecasts hinzufügen
-        fig5.add_trace(go.Scatter(x=last_24h_fc.index, y=last_24h_fc.values, name="naive_24h", mode="lines"))
-        fig5.add_trace(go.Scatter(x=last_week_fc.index, y=last_week_fc.values, name="naive_168h", mode="lines"))
+    # Nur die letzten 3 Tage der historischen Daten für den Plot nehmen
+    hist = df.iloc[-3 * 24:]
 
-        # Sarima Forecast aus csv
-       # fig5.add_trace(go.Scatter(x=sarima_pred.index, y=sarima_pred["yhat"], name="SARIMA", mode="lines",line=dict(color="white", width=2, dash="solid")))
-        # 1) Prediction-Band
-        #fig5.add_trace(go.Scatter(
-          #  x=sarima_pred.index, y=sarima_pred["lo"],
-         #   mode='lines',
-         #   line=dict(width=0),  # keine sichtbare Linie unten
-         #   showlegend=False,
-         #   hoverinfo='skip',
-         #   name='PI lower'
-      #  ))
-       # fig5.add_trace(go.Scatter(
-        #    x=sarima_pred.index, y=sarima_pred["hi"],
-        #    mode='lines',
-        #    line=dict(width=0),
-        #    fill='tonexty',  # füllt bis zum vorherigen Trace (y_lower)
-        #    fillcolor='rgba(211, 211, 211, 0.5)',  # halbtransparent
-        #    name='Prediction interval SARIMA'
-        #))
+    # Plot erstellen, Traces für die Forecasts hinzufügen
+    fig5 = px.area(hist, x=hist.index, y="y", title="Forecast 24h vs. Historie")
+    fig5.add_trace(go.Scatter(x=last_24h_fc.index, y=last_24h_fc.values, name="naive_24h", mode="lines"))
+    fig5.add_trace(go.Scatter(x=last_week_fc.index, y=last_week_fc.values, name="naive_168h", mode="lines"))
+    # ============SARIMA Forecast=====================#
+
+    st.markdown("**SARIMA Forecast**")
+    c1, c2 ,c3= st.columns([3,2,1])
 
 
-        forecast_start_time = last_24h_fc.index[0]
+    if "filter_forecast" not in st.session_state:
+        st.session_state["filter_forecast"]=False
+    if "refit" not in st.session_state:
+        st.session_state["refit"]=False
 
-        # vertikale Linie als "shape" hinzufügen
-        fig5.add_shape(
-            type="line",
-            x0=forecast_start_time, y0=0,
-            x1=forecast_start_time, y1=1,
-            yref="paper",  # y-Koordinaten beziehen sich auf die Höhe des Plots (0=unten, 1=oben)
-            line=dict(color="Red", width=2, dash="dash")
-        )
 
-        fig5.add_annotation(
-            x=forecast_start_time,
-            y=1.05,  # Leicht über dem oberen Rand des Plots
-            yref="paper",
-            text="Forecast Start",
-            showarrow=False,
-            xanchor="left"
-        )
+    with c1:
+        if st.button("⚡ Schnell-Forecast (aktualisierte Zustände, gleiche Parameter"):
+            st.session_state["filter_forecast"]=True
+            st.session_state["refit"] = False
+            try:
+                yhat, pi = forecast_from_params(s, H=24, params_path="sarima_params.npz", spec_path="sarima_spec.json")
+                yhat_loc, pi_loc = to_local(yhat, pi)
+                st.session_state["yhat"] = yhat_loc
+                st.session_state["pi"] = pi_loc
+            except Exception as e:
+                st.warning(f"Initialmodell nicht ladbar: {e}")
 
-        # Layout und Labels verbessern
-        fig5.data[0].name = "Historie"  # Label für die Area-Trace in der Legende
-        fig5.update_xaxes(title_text="")
-        fig5.update_yaxes(title_text="total load (MW)")
-        fig5.update_layout(
-            hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
-        )
+        if st.session_state["filter_forecast"]:
+            spec = json.load(open("sarima_spec.json", "r"))
+            fig5.add_trace(go.Scatter(x=st.session_state["yhat"] .index, y=st.session_state["yhat"] .values,
+                                      name="SARIMA (init)", mode="lines"))
+            fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["lo"], mode="lines",
+                                      line=dict(width=0), showlegend=False, hoverinfo="skip"))
+            fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["hi"], mode="lines",
+                                      line=dict(width=0), fill="tonexty",
+                                      fillcolor="rgba(211,211,211,0.35)", name="PI 95% (init)"))
+            st.caption(f"Order {spec['order']} | Seasonal Order {spec['seasonal_order']} | Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
 
-        st.plotly_chart(fig5, use_container_width=True)
+    with c3:
+        refit_days = int(st.segmented_control("Refit Tage", [30, 60, 90], default=60))
+    with c2:
+        if st.button(f"🔁 Refit {refit_days}T (Parameter neu schätzen)"):
+            st.session_state["filter_forecast"]=False
+            st.session_state["refit"] = True
+            with st.spinner("Refit (60 Tage) & Forecast..."):
+                yhat, pi, res = refit_predict_pi(s, H=24, win_days=refit_days, m=168, alpha=0.05)
+                yhat_loc, pi_loc = to_local(yhat, pi)
+                st.session_state["yhat"] = yhat_loc
+                st.session_state["pi"] = pi_loc
+              #  st.session_state["sarima_res"] = res  # optional: im Lauf behalten
+
+        if st.session_state["refit"]:
+            spec = json.load(open("sarima_spec.json", "r"))
+            fig5.add_trace(go.Scatter(x=st.session_state["yhat"] .index, y=st.session_state["yhat"] .values,
+                                      name="SARIMA (refit)", mode="lines"))
+            fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["lo"],
+                                      mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
+            fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["hi"],
+                                      mode="lines", line=dict(width=0), fill="tonexty",
+                                      fillcolor="rgba(125,125,125,0.30)", name="PI 95% (refit)"))
+            st.caption(
+                f"Order {spec['order']} | Seasonal Order {spec['seasonal_order']} | Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
+
+
+
+    forecast_start_time = last_24h_fc.index[0]
+
+    # vertikale Linie als "shape" hinzufügen
+    fig5.add_shape(
+        type="line",
+        x0=forecast_start_time, y0=0,
+        x1=forecast_start_time, y1=1,
+        yref="paper",  # y-Koordinaten beziehen sich auf die Höhe des Plots (0=unten, 1=oben)
+        line=dict(color="Red", width=2, dash="dash")
+    )
+
+    fig5.add_annotation(
+        x=forecast_start_time,
+        y=1.05,  # Leicht über dem oberen Rand des Plots
+        yref="paper",
+        text="Forecast Start",
+        showarrow=False,
+        xanchor="left"
+    )
+
+    # Layout und Labels verbessern
+    fig5.data[0].name = "Historie"  # Label für die Area-Trace in der Legende
+    fig5.update_xaxes(title_text="")
+    fig5.update_yaxes(title_text="total load (MWh)")
+    fig5.update_layout(
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
+    )
+
+    st.plotly_chart(fig5, use_container_width=True)
+
+    #== Backtesting aktuelles Modell==================#
+    if "qcheck" not in st.session_state:
+        st.session_state["qcheck"]=False
+
+    st.divider()
+    st.subheader("📏 Qualitätscheck")
+    st.badge("Backtesting letzten Tage: Filter-Forecast mit aktuellen Parametern (kein Re-Fit)")
+    cols=st.columns([1,3])
+    with cols[0]:
+        eval_days = int(st.segmented_control("Letzten Tage",[1,2,3],default=1))
+    if st.button("Qualitätscheck starten"):
+        st.session_state["qcheck"]=True
+        with st.spinner("Backtesting des aktuellen Modells..."):
+            st.caption(f"Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
+            res_sess = st.session_state.get("sarima_res", None)  # falls Nutzer Refit macht
+            kpis, gain = backtest_current_model(s, H=24, eval_days=eval_days, win_days=spec["win_days"], m=168,
+                                                session_res=res_sess,
+                                                spec_path="sarima_spec.json", params_path="sarima_params.npz")
+            st.session_state["kpis"]=kpis
+            st.session_state["gain"] = gain
+
+
+
+    if st.session_state.get("qcheck", False):
+        c1, c2, c3 = st.columns(3)
+        mae = st.session_state["kpis"].get("MAE", np.nan)
+        smape_v = st.session_state["kpis"].get("sMAPE", np.nan)
+
+        with c1:
+            kpi_card("MAE (MWh)", mae, "MWh", icon="📉")
+        with c2:
+            kpi_card("sMAPE", smape_v, "%", icon="🧭")
+
+        gate = 5.0  # 5% besser als Seasonal-Naive
+        gain_val = None if (st.session_state["gain"] is None or np.isnan(st.session_state["gain"])) else float(st.session_state["gain"])
+        ok = (gain_val is not None) and (gain_val >= gate)
+
+        # Text robust formatieren (NaN-sicher)
+        txt = "Keine gültigen Folds im Fenster."
+        if gain_val is not None:
+            txt = f"{gain_val:.1f}% besser als s-Naive(168) – {'OK ✅' if ok else 'unter Gate ❗'}"
+
+        with c3:
+            kpi_card("Vorteil ggü. s-Naive",
+                     0.0 if (gain_val is None) else gain_val, "%",
+                     icon=("✅" if ok else "⚠️"),
+                     footnote=f"Gate: ≥ {gate:.0f}% · {txt}")
+
+
+
 
     #======================================================================================================#
-
+with scenarios:
     #Szenarien
     st.divider()
     st.subheader("🔬 Szenario-Simulation (What-if)")
@@ -428,7 +552,7 @@ with forecast:
 
     with c1:
         kpi_card("Δ Peak (vs. Base)", float(y_scn.max() - y_base.max()),
-                 unit="MW", icon="⚡", footnote="Negativ = Peak-Reduktion")
+                 unit="MWh", icon="⚡", footnote="Negativ = Peak-Reduktion")
 
     with c2:
         kpi_card("Δ Energie (Szenario − Base)", float((y_scn - y_base).sum()),
@@ -446,6 +570,6 @@ with forecast:
             fig6.add_vrect(x0=x0, x1=x1, fillcolor="green", opacity=0.2, line_width=0, layer="below")
 
 
-    fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="MW",
+    fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="MWh",
                       legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig6, use_container_width=True)

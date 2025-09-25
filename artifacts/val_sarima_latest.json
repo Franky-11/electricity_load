@@ -1,6 +1,6 @@
 {
   "meta": {
-    "validated_at": "2025-09-23 19:25",
+    "validated_at": "2025-09-25 16:57",
     "order": "(1,0,0)",
     "seasonal_order": "(0,1,0,168)",
     "train_window_days": 90,
@@ -9,9 +9,9 @@
   },
   "data": [
     {
-      "MAE": 492.223,
-      "sMAPE (%)": 1.053,
-      "MASE_168": 0.221
+      "MAE": 1162.039,
+      "sMAPE": 2.264,
+      "MASE168": 0.737
     }
   ]
 }

@@ -2,10 +2,30 @@ from sklearn.metrics import mean_absolute_error
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.statespace.kalman_filter import MEMORY_NO_SMOOTHING
+
+import gc
 
 import holidays
 import streamlit as st
 import json
+import os
+
+ARTIFACTS_DIR = os.environ.get("ARTIFACTS_DIR", "artifacts")  # per Docker-Volume persistiert
+os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+
+PARAM_PATH = os.path.join(ARTIFACTS_DIR, "sarima_params.npz")
+SPEC_PATH  = os.path.join(ARTIFACTS_DIR, "sarima_spec.json")
+VAL_PATH   = os.path.join(ARTIFACTS_DIR, "val_sarima_latest.json")
+
+# Fallbacks: wenn Artefakt im Volume fehlt, aus Repo lesen (initiale Dateien)
+REPO_PARAM_FALLBACK = "sarima_params.npz"
+REPO_SPEC_FALLBACK  = "sarima_spec.json"
+
+def resolve_params_spec():
+    p = PARAM_PATH if os.path.exists(PARAM_PATH) else REPO_PARAM_FALLBACK
+    s = SPEC_PATH  if os.path.exists(SPEC_PATH)  else REPO_SPEC_FALLBACK
+    return p, s
 
 
 def smape(y, yhat):
@@ -89,6 +109,9 @@ def _exog_utcnaive_to_local(idx_naive_utc: pd.DatetimeIndex) -> pd.DataFrame:
     X["is_hol"] = pd.Series(idx_local.date, index=idx_naive_utc).map(lambda d: d in hol).astype(int)
     return X
 
+
+
+"""
 def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval=30, step_hours=24):
     # 1) TZ-sicher nach UTC, dann TZ entfernen → keine DST-Duplikate
     s0 = s.copy()
@@ -113,30 +136,104 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
             fc = res.get_forecast(steps=len(te), exog=Xte).predicted_mean
             fc = pd.Series(np.asarray(fc), index=te.index)    # identische Labels erzwingen
             rows.append({"MAE": mean_absolute_error(te, fc),
-                         "sMAPE (%)": smape(te, fc),
-                         "MASE_168": mase(te, fc, tr, m=168)})
+                         "sMAPE": smape(te, fc),
+                         "MASE168": mase(te, fc, tr, m=168)})
         except Exception as e:
             # zum Debuggen: print("Fold skipped:", e)
             pass
         t += pd.Timedelta(hours=step_hours)
 
     out = pd.DataFrame(rows)
-    summary = (out.mean(numeric_only=True).to_frame().T if len(out) else out)
-    return summary.round(3)
+    return out.mean().round(3) if len(out) else out
+
+"""
+
+def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval=30, step_hours=24):
+    # 1) Serie UTC-naiv, stündlich, sauber
+    s0 = s.copy()
+    if s0.index.tz is not None:
+        s0 = s0.tz_convert("UTC").tz_localize(None)
+    s0 = (s0.sort_index()[~s0.index.duplicated(keep="first")]).asfreq("h")
+
+    m = 168; rows = []
+    t = s0.index.max() - pd.Timedelta(days=days_to_eval)
+    while t + pd.Timedelta(hours=H) <= s0.index.max():
+        tr = s0.loc[:t].tail(24*window_days).ffill()
+        te = s0.loc[t + pd.Timedelta(hours=1): t + pd.Timedelta(hours=H)]
+        if len(tr) < 2*m or len(te) == 0:
+            t += pd.Timedelta(hours=step_hours); continue
+
+        # 2) Exogene (float + feste Reihenfolge)
+        Xtr = _exog_utcnaive_to_local(tr.index).astype("float64")
+        Xte = _exog_utcnaive_to_local(te.index).astype("float64")
+        cols = ["is_weekend", "is_hol"]
+        if all(c in Xtr.columns for c in cols):
+            Xtr, Xte = Xtr[cols], Xte[cols]
+
+        try:
+            # 3) Leichtgewichtig fitten (nur Parameter), dann filtern mit Memory-Schutz
+            mod = SARIMAX(tr, order=(1,0,0), seasonal_order=(0,1,0,m),
+                          exog=Xtr, enforce_stationarity=False, enforce_invertibility=False)
+            try:
+                params_hat = mod.fit(method="lbfgs", maxiter=150, disp=False,
+                                     return_params=True, low_memory=True)
+            except TypeError:
+                params_hat = mod.fit(method="lbfgs", maxiter=150, disp=False, return_params=True)
+
+            res = mod.filter(params_hat, conserve_memory=MEMORY_NO_SMOOTHING)
+
+            fc_obj = res.get_forecast(steps=len(te), exog=Xte)
+            fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
+
+            # 4) Robust scorEN (NaN-Maske + Coverage)
+            y_true = te.astype(float)
+            mask = (~y_true.isna()) & (~fc.isna())
+            if mask.sum() < int(0.8*len(fc)):
+                # aufräumen, nächster Fold
+                del fc_obj, res, mod, Xtr, Xte; gc.collect()
+                t += pd.Timedelta(hours=step_hours); continue
+
+            yt, yp = y_true[mask], fc[mask]
+            rows.append({
+                "MAE": mean_absolute_error(yt, yp),
+                "sMAPE": smape(yt, yp),
+                "MASE168": mase(yt, yp, tr, m=168),
+            })
+
+            # 5) Speicher freigeben
+            del fc_obj, res, mod, Xtr, Xte
+            if len(rows) % 2 == 0:
+                gc.collect()
+
+        except Exception:
+            # optional: logging
+            pass
+
+        t += pd.Timedelta(hours=step_hours)
+
+    out = pd.DataFrame(rows)
+    if len(out):
+        summary = out.mean(numeric_only=True).to_frame().T
+        return summary.round(3)
+    else:
+        return out
 
 
-VAL_PATH = "artifacts/val_sarima_latest.json"
-def save_validation_json(df: pd.DataFrame, meta: dict, path: str = VAL_PATH):
+
+
+def save_validation_json(df, meta, path=VAL_PATH):
+    if isinstance(df, pd.Series):
+        df = df.to_frame().T
     obj = {"meta": meta, "data": df.round(3).to_dict(orient="records")}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
-def load_validation_json(path: str = VAL_PATH):
+def load_validation_json(path=VAL_PATH):
     with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
-    df = pd.DataFrame(obj.get("data", []))
-    meta = obj.get("meta", {})
-    return df, meta
+    return pd.DataFrame(obj.get("data", [])), obj.get("meta", {})
+
+
 
 
 def load_sarima_pred():
@@ -163,39 +260,87 @@ def kpi_card(title: str, value: float, unit: str = "", icon: str = "⚡", footno
     """, unsafe_allow_html=True)
 
 
-
-def refit_predict_pi(s, H=24, win_days=60, m=168, alpha=0.05):
-    y = s.asfreq("H")
+"""
+def refit_predict_pi(s, H=24, win_days=90, m=168, alpha=0.05):
+    y = s.asfreq("h")
     if y.index.tz is not None: y = y.tz_convert("UTC").tz_localize(None)
     tr = y.tail(24*win_days).ffill()
     idx_f = pd.date_range(y.index[-1]+pd.Timedelta(hours=1), periods=H, freq="h")
 
-    def exog(idx):
-        loc = idx.tz_localize("UTC").tz_convert("Europe/Berlin")
-        yrs = range(loc.min().year, loc.max().year+1); hol = holidays.Germany(years=yrs)
-        X = pd.DataFrame(index=idx)
-        X["is_weekend"] = (loc.dayofweek>=5).astype(int)
-        X["is_hol"] = pd.Series(loc.date, index=idx).map(lambda d: d in hol).astype(int)
-        return X
-
     res = SARIMAX(tr, order=(1,0,0), seasonal_order=(0,1,0,m),
-                  exog=exog(tr.index), enforce_stationarity=False,
+                  exog=_exog_utcnaive_to_local(tr.index), enforce_stationarity=False,
                   enforce_invertibility=False).fit(disp=False, maxiter=200)
 
-    fc = res.get_forecast(H, exog=exog(idx_f))
+    fc = res.get_forecast(H, exog=_exog_utcnaive_to_local(idx_f))
     yhat = pd.Series(np.asarray(fc.predicted_mean), index=idx_f)
     pi = fc.conf_int(alpha=alpha); pi.columns = ["lo","hi"]; pi.index = idx_f
-    save_model_light(res,win_days=win_days, params_path="sarima_params.npz", spec_path="sarima_spec.json")
-
+    save_model_light(res, win_days=win_days, params_path=PARAM_PATH, spec_path=SPEC_PATH)
 
     return yhat, pi, res
 
+"""
 
-def forecast_from_params(s, H=24, params_path="sarima_params.npz", spec_path="sarima_spec.json"):
+
+def refit_predict_pi(s, H=24, win_days=90, m=168, alpha=0.05,
+                     params_path=PARAM_PATH, spec_path=SPEC_PATH):
+    # 1) Daten vorbereiten (UTC-naiv)
+    y = s.asfreq("h")
+    if y.index.tz is not None:
+        y = y.tz_convert("UTC").tz_localize(None)
+    tr = y.tail(24*win_days).ffill()
+    idx_f = pd.date_range(y.index[-1] + pd.Timedelta(hours=1), periods=H, freq="h")
+
+    # 2) Exogene (float + feste Spaltenreihenfolge)
+    Xtr = _exog_utcnaive_to_local(tr.index).astype("float64")
+    Xf  = _exog_utcnaive_to_local(idx_f).astype("float64")
+    cols = ["is_weekend", "is_hol"]
+    if all(c in Xtr.columns for c in cols):
+        Xtr, Xf = Xtr[cols], Xf[cols]
+
+    # 3) Spezifikation + Warmstart (falls Snapshot da)
+    order, seas = (1,0,0), (0,1,0,m)
+    start_params = None
+    try:
+        spec = json.load(open(spec_path, "r", encoding="utf-8"))
+        order = tuple(spec.get("order", order))
+        seas  = tuple(spec.get("seasonal_order", seas))
+        start_params = np.load(params_path)["params"]
+    except Exception:
+        pass
+
+    mod = SARIMAX(tr, order=order, seasonal_order=seas, exog=Xtr,
+                  enforce_stationarity=False, enforce_invertibility=False)
+
+    # 4) PARAMETER schätzen (leichtgewichtig), dann FILTERn (speicherschonend)
+    try:
+        params_hat = mod.fit(start_params=start_params, method="lbfgs",
+                             maxiter=150, disp=False, return_params=True, low_memory=True)
+    except TypeError:
+        params_hat = mod.fit(start_params=start_params, method="lbfgs",
+                             maxiter=150, disp=False, return_params=True)
+
+    res = mod.filter(params_hat, conserve_memory=MEMORY_NO_SMOOTHING)
+
+    # 5) Forecast + PI
+    fc = res.get_forecast(H, exog=Xf)
+    yhat = pd.Series(np.asarray(fc.predicted_mean), index=idx_f, name="yhat")
+    pi = fc.conf_int(alpha=alpha)
+    pi.columns = ["lo", "hi"]; pi.index = idx_f
+
+    # 6) Snapshot speichern (klein) + Aufräumen
+    save_model_light(res,win_days=win_days, params_path=params_path, spec_path=spec_path)
+    del fc, res, mod, Xtr, Xf; gc.collect()
+
+    return yhat, pi
+
+
+
+
+def forecast_from_params(s, H=24,win_days=90, params_path=PARAM_PATH, spec_path=SPEC_PATH):
     # a) Aktuelle letzten 90 Tage vorbereiten (UTC-naiv)
     y = s.asfreq("h")
     if y.index.tz is not None: y = y.tz_convert("UTC").tz_localize(None)
-    tr = y.tail(24*90).ffill()
+    tr = y.tail(24*win_days).ffill()
     idx_f = pd.date_range(y.index[-1] + pd.Timedelta(hours=1), periods=H, freq="h")
 
     # b) Exogene exakt wie im Refit
@@ -225,7 +370,7 @@ def to_local(yhat: pd.Series, pi: pd.DataFrame):
     return yhat_loc, pi_loc
 
 
-def save_model_light(res,win_days, params_path="sarima_params.npz", spec_path="sarima_spec.json"):
+def save_model_light(res,win_days, params_path=PARAM_PATH, spec_path=SPEC_PATH):
     spec = {
         "order":         list(res.model.order),
         "seasonal_order":list(res.model.seasonal_order),
@@ -248,50 +393,60 @@ def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
         params = np.asarray(session_res.params)
     else:
         spec = json.load(open(spec_path)); params = np.load(params_path)["params"]
+
     # 3) Walk-forward
     t = y.index.max() - pd.Timedelta(days=eval_days)
-
-
     while t + pd.Timedelta(hours=H) <= y.index.max():
-        tr = y.loc[:t].tail(win_days*24).ffill(); te_idx = pd.date_range(t+pd.Timedelta(hours=1), periods=H, freq="h")
-        if len(tr)<2*m:
-            t+=pd.Timedelta(hours=H)
-            continue
+        tr = y.loc[:t].tail(win_days*24).ffill()
+        te_idx = pd.date_range(t + pd.Timedelta(hours=1), periods=H, freq="h")
+        if len(tr) < 2*m:
+            t += pd.Timedelta(hours=H); continue
 
-        Xtr, Xte = _exog_utcnaive_to_local(tr.index), _exog_utcnaive_to_local(te_idx)
+        # --- Exogene float + feste Spaltenreihenfolge (robust) ---
+        Xtr = _exog_utcnaive_to_local(tr.index).astype("float64")
+        Xte = _exog_utcnaive_to_local(te_idx).astype("float64")
+        cols = ["is_weekend", "is_hol"]
+        if all(c in Xtr.columns for c in cols):
+            Xtr = Xtr[cols]; Xte = Xte[cols]
 
+        # --- Modell & FILTER mit Memory-Schonung ---
         mod = SARIMAX(tr,
                       order=tuple(spec["order"]),
                       seasonal_order=tuple(spec["seasonal_order"]),
                       exog=Xtr,
                       enforce_stationarity=False, enforce_invertibility=False)
+        res = mod.filter(params, conserve_memory=MEMORY_NO_SMOOTHING)  # <= HIER
 
-
-        res = mod.filter(params)
-        fc = pd.Series(np.asarray(res.get_forecast(H, exog=Xte).predicted_mean), index=te_idx)
+        # --- Forecast ---
+        fc_obj = res.get_forecast(H, exog=Xte)
+        fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te_idx)
         base = s_naive(tr, len(fc), m=m)
 
-
-        # --- robustes Scoring ohne NaN-Crash ---
-        y_true = y.reindex(fc.index).astype(float)  # 1) Ziel an fc-Index ausrichten
-        base = s_naive(tr, len(fc), m=m).reindex(fc.index).astype(float)
-
-        mask = (~y_true.isna()) & (~fc.isna())  # 2) Nur vollständige Paare
+        # --- robustes Scoring ---
+        y_true = y.reindex(fc.index).astype(float)
+        base = base.reindex(fc.index).astype(float)
+        mask = (~y_true.isna()) & (~fc.isna())
         cov = int(mask.sum())
-        if cov < int(0.8 * len(fc)):  # 3) Zu wenig Abdeckung? -> Fold skippen
-            t += pd.Timedelta(hours=H);
-            continue
+        if cov < int(0.8 * len(fc)):
+            # Aufräumen & nächster Fold
+            del fc_obj, res, mod, Xtr, Xte
+            gc.collect()
+            t += pd.Timedelta(hours=H); continue
 
         yt, yp = y_true[mask], fc[mask]
-
         rows.append({
             "MAE": mean_absolute_error(yt, yp),
             "sMAPE": smape(yt, yp),
-            "MAE_base": mean_absolute_error(yt, base[mask])
+            "MAE_base": mean_absolute_error(yt, base[mask]),
         })
 
-        t += pd.Timedelta(hours=H)
-    df = pd.DataFrame(rows)
+        # Speicher freigeben (wichtig bei Compose/Docker)
+        del fc_obj, res, mod, Xtr, Xte
+        if len(rows) % 2 == 0:
+            gc.collect()
 
+        t += pd.Timedelta(hours=H)
+
+    df = pd.DataFrame(rows)
     return (df[["MAE","sMAPE"]].mean().round(3),
             float((df["MAE_base"].mean() - df["MAE"].mean())/df["MAE_base"].mean()*100) if len(df) else np.nan)

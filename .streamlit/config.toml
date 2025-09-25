@@ -5,3 +5,31 @@ backgroundColor = "#000000"          # App-Hintergrund
 secondaryBackgroundColor = "#0f1c2e" # Sidebar/Karten
 textColor = "#FFFFFF"                # hoher Kontrast
 font = "sans serif"
+
+# --- Server/Runtime ---
+[server]
+# Für Docker wichtig: lausche auf allen Interfaces
+address = "0.0.0.0"
+port = 8501
+headless = true
+# CORS nur deaktivieren, wenn die App hinter deinem eigenen Proxy läuft
+enableCORS = false
+# XSRF-Schutz aktiv lassen
+enableXsrfProtection = true
+# Optional: vermeidet ständige Reruns bei Artefakt-Updates
+folderWatchingBlacklist = ["artifacts", ".git", ".venv", "__pycache__"]
+
+# --- Client/UI ---
+[client]
+# "viewer" versteckt Dev-Toolbar; "auto" zeigt sie nur lokal
+toolbarMode = "viewer"
+showErrorDetails = true
+
+# --- Browser/Telemetrie ---
+[browser]
+# Keine Nutzungsstatistiken senden (optional)
+gatherUsageStats = false
+
+# --- Logging ---
+[logger]
+level = "info"

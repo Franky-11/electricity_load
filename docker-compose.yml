@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports: ["8501:8501"]
+    environment:
+      ARTIFACTS_DIR: /app/artifacts
+      TZ: Europe/Berlin
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    volumes:
+      - ./artifacts:/app/artifacts
+    restart: unless-stopped
+    mem_limit: 4g

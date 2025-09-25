@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 
 import plotly.graph_objects as go
@@ -41,6 +42,7 @@ min_date = df.index.date.min()
 max_date = df.index.date.max()
 
 st.sidebar.markdown("**Zeitraum**")
+
 date_range = st.sidebar.date_input(
     "Von ... bis ... (inklusive)",
     value=(min_date, max_date),
@@ -53,6 +55,8 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 else:
     # Falls Nutzer nur ein Datum wählt, nimm das als beides
     start_date = end_date = date_range
+
+
 
 if start_date > end_date:
     st.sidebar.warning("Startdatum > Enddatum – ich habe es getauscht.")
@@ -229,14 +233,11 @@ with forecast:
 
     if submit:
         st.session_state["backtesting"] = True
-
-    #if st.session_state.get("backtesting", False):
-
         ph.write("")
         with st.spinner("Walk-Forward Backtesting Baslines..."):
             df_base = eval_baselines(s, H=24, m=24, win_days=win_days, eval_days=eval_days)
-            st.markdown(f"**Baselines** | {eval_days} Tage Validierung")
-            st.dataframe(df_base)
+            st.session_state["df_base"] = df_base
+
         if with_sarimax:
             with st.spinner("Walk-Forward Backtesting SARIMA..."):
                 df_sarimax= eval_sarimax_rolling90_fast(s, H=24, window_days=win_days, days_to_eval=eval_days,
@@ -258,29 +259,34 @@ with forecast:
                 st.session_state["last_val_df"] = df_sarimax
                 st.session_state["last_val_meta"] = meta
 
-                st.markdown(f"**SARIMA + exog. Features** | {win_days}T Train, {eval_days}T Val")
-                st.caption(f"Validierung am {meta['validated_at']} | order (1,0,0) × (0,1,0,168)")
-                st.dataframe(df_sarimax, hide_index=True)
-
+    if st.session_state.get("backtesting", False):
+        ph.write("")
+        st.markdown(f"**Baselines** | {eval_days} Tage Validierung")
+        st.dataframe(st.session_state["df_base"])
+        st.divider()
+        st.markdown("Letzte Validierung **SARIMA + exog. Features**")
+        if "last_val_df" in st.session_state:
+            df_sarimax = st.session_state["last_val_df"]
+            meta = st.session_state.get("last_val_meta", {})
         else:
-            st.markdown("Letzte Validierung **SARIMA + exog. Features**")
-            if "last_val_df" in st.session_state:
-                df_sarimax = st.session_state["last_val_df"]
-                meta = st.session_state.get("last_val_meta", {})
-            else:
-                try:
-                    df_sarimax, meta = load_validation_json()  # aus artifacts/...
-                except FileNotFoundError:
-                    # Fallback: ein kleiner Platzhalter
-                    df_sarimax = pd.DataFrame([[645, 1.5, 0.29, 95.2]],
-                                              columns=["MAE", "sMAPE (%)", "MASE_168", "coverage PI (%)"])
-                    meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90,
-                            "eval_days": 30}
+            try:
+                df_sarimax, meta = load_validation_json()  # aus artifacts/...
 
-            st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | "
-                       f"{meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | "
-                       f"{meta.get('validated_at', '(kein Zeitstempel)')}")
-            st.dataframe(df_sarimax, hide_index=True)
+            except FileNotFoundError:
+                # Fallback: ein kleiner Platzhalter
+                df_sarimax = pd.DataFrame([[645, 1.5, 0.29, 95.2]],
+                                          columns=["MAE", "sMAPE (%)", "MASE_168", "coverage PI (%)"])
+                meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90,
+                        "eval_days": 30}
+
+        st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | "
+                   f"{meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | "
+                   f"{meta.get('validated_at', '(kein Zeitstempel)')}")
+        st.dataframe(df_sarimax, hide_index=True)
+
+
+
+
 
     st.divider()
     #============Forecasting================================================#
@@ -308,13 +314,15 @@ with forecast:
     if "refit" not in st.session_state:
         st.session_state["refit"]=False
 
+    params_path, spec_path = resolve_params_spec()
 
     with c1:
         if st.button("⚡ Schnell-Forecast (aktualisierte Zustände, gleiche Parameter"):
             st.session_state["filter_forecast"]=True
             st.session_state["refit"] = False
             try:
-                yhat, pi = forecast_from_params(s, H=24, params_path="sarima_params.npz", spec_path="sarima_spec.json")
+                spec = json.load(open(spec_path, "r", encoding="utf-8"))
+                yhat, pi = forecast_from_params(s, H=24,win_days=spec["win_days"], params_path=params_path, spec_path=spec_path)
                 yhat_loc, pi_loc = to_local(yhat, pi)
                 st.session_state["yhat"] = yhat_loc
                 st.session_state["pi"] = pi_loc
@@ -322,7 +330,11 @@ with forecast:
                 st.warning(f"Initialmodell nicht ladbar: {e}")
 
         if st.session_state["filter_forecast"]:
-            spec = json.load(open("sarima_spec.json", "r"))
+
+            #params = np.load(params_path)["params"]
+
+            spec   = json.load(open(spec_path, "r", encoding="utf-8"))
+
             fig5.add_trace(go.Scatter(x=st.session_state["yhat"] .index, y=st.session_state["yhat"] .values,
                                       name="SARIMA (init)", mode="lines"))
             fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["lo"], mode="lines",
@@ -338,15 +350,16 @@ with forecast:
         if st.button(f"🔁 Refit {refit_days}T (Parameter neu schätzen)"):
             st.session_state["filter_forecast"]=False
             st.session_state["refit"] = True
-            with st.spinner("Refit (60 Tage) & Forecast..."):
-                yhat, pi, res = refit_predict_pi(s, H=24, win_days=refit_days, m=168, alpha=0.05)
+            with st.spinner(f"Refit {refit_days} & Forecast..."):
+                yhat, pi = refit_predict_pi(s, H=24, win_days=refit_days, m=168, alpha=0.05)
                 yhat_loc, pi_loc = to_local(yhat, pi)
                 st.session_state["yhat"] = yhat_loc
                 st.session_state["pi"] = pi_loc
               #  st.session_state["sarima_res"] = res  # optional: im Lauf behalten
 
         if st.session_state["refit"]:
-            spec = json.load(open("sarima_spec.json", "r"))
+            params_path, spec_path = resolve_params_spec()
+            spec = json.load(open(spec_path, "r"))
             fig5.add_trace(go.Scatter(x=st.session_state["yhat"] .index, y=st.session_state["yhat"] .values,
                                       name="SARIMA (refit)", mode="lines"))
             fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["lo"],
@@ -393,8 +406,8 @@ with forecast:
     #== Backtesting aktuelles Modell==================#
     if "qcheck" not in st.session_state:
         st.session_state["qcheck"]=False
-
-    spec=spec if st.session_state["refit"] else json.load(open("sarima_spec.json","r"))
+    params_path, spec_path = resolve_params_spec()
+    spec=spec if st.session_state["refit"] else json.load(open(spec_path, "r"))
 
     st.divider()
     st.subheader("📏 Qualitätscheck")
@@ -409,7 +422,7 @@ with forecast:
             res_sess = st.session_state.get("sarima_res", None)  # falls Nutzer Refit macht
             kpis, gain = backtest_current_model(s, H=24, eval_days=eval_days, win_days=spec["win_days"], m=168,
                                                 session_res=res_sess,
-                                                spec_path="sarima_spec.json", params_path="sarima_params.npz")
+                                                spec_path=spec_path, params_path=params_path)
             st.session_state["kpis"]=kpis
             st.session_state["gain"] = gain
 
@@ -446,9 +459,13 @@ with forecast:
     #======================================================================================================#
 with scenarios:
     #Szenarien
-    st.divider()
     st.subheader("🔬 Szenario-Simulation (What-if)")
-    rng = st.date_input("Historienfenster", [start_date, end_date])
+
+    rng = st.date_input("Historienfenster",value = (min_date, max_date),
+    min_value = min_date,
+    max_value = max_date)
+
+
     if isinstance(rng, tuple) and len(rng) == 2:
         start_date, end_date = rng
     else:
@@ -466,11 +483,11 @@ with scenarios:
         use_hw = st.checkbox("Feiertag/Wochenende skalieren")
         use_shift = st.checkbox("Peak → Off-Peak verschieben")
         use_temp = st.checkbox("Temperatur-Sensitivität")
-        use_eff = st.checkbox("Effizienz-Trend (ab Datum)")
     with col2:
+        use_eff = st.checkbox("Effizienz-Trend (ab Datum)")
         use_event = st.checkbox("Event-Tag(e) skalieren")
-        use_pv = st.checkbox("PV berücksichtigen (Netto-Last)")
-        use_wind = st.checkbox("Wind berücksichtigen (Netto-Last)")
+        #use_pv = st.checkbox("PV berücksichtigen (Netto-Last)")
+       # use_wind = st.checkbox("Wind berücksichtigen (Netto-Last)")
 
     y_scn = y_base.copy()
 
@@ -508,11 +525,11 @@ with scenarios:
         dlist = [d.strip() for d in dates.split(",") if d.strip()]
         if dlist: y_scn = event_days(y_scn, dlist, mult)
 
-    pv_mw = wind_mw = 0.0
-    if use_pv:   pv_mw = st.number_input("PV-Kapazität (MW)", 0.0, 100000.0, 2000.0, 100.0)
-    if use_wind: wind_mw = st.number_input("Wind-Kapazität (MW)", 0.0, 100000.0, 3000.0, 100.0)
-    if use_pv or use_wind:
-        y_scn = apply_net_load(y_scn, pv_mw, wind_mw)
+  #  pv_mw = wind_mw = 0.0
+  #  if use_pv:   pv_mw = st.number_input("PV-Kapazität (MW)", 0.0, 100000.0, 2000.0, 100.0)
+  #  if use_wind: wind_mw = st.number_input("Wind-Kapazität (MW)", 0.0, 100000.0, 3000.0, 100.0)
+  #  if use_pv or use_wind:
+  #      y_scn = apply_net_load(y_scn, pv_mw, wind_mw)
 
     # 3) KPIs
     # === 1) Styles + Helper ===

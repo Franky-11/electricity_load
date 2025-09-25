@@ -1,7 +1,6 @@
 # Stromlast‑Forecast DE
 > Interaktive Web‑App für **EDA**, **Baselines/Backtesting**, optional **SARIMA(+exog)** und **What‑if‑Szenarien** auf **stündlichen** Stromlastdaten (TZ: *Europe/Berlin*).
 
-**App**: https://stromviz.streamlit.app/
 
 ## ✨ Features
 
@@ -15,7 +14,6 @@
   - Temperatur‑Sensitivity (linear),
   - Effizienz‑/Spar‑Trend (ab Datum),
   - Event‑Tage (±%),
-  - Netto‑Last via **synthetische PV/Wind**.
 - **KPI‑Cards**: Δ Peak (MW), Δ Energie (MWh) für Szenarien.
 
 ---
@@ -30,13 +28,34 @@ smard_data.py  # Daten‑Loader für SMARD
 
 ```
 ---
+## ▶️ Anwendung
+
+**Voraussetzungen**
+
+- Docker Desktop (Windows/macOS) oder Docker Engine (Linux)
+- Port 8501 ist frei
+**Repository holen**
+
+**Repo holen**
+
+- git clone https://github.com/Franky-11/electricity_load.git
+- cd electricity_load
+
+**Schnellstart mit Docker Compose** 
+
+```
+docker compose up --build
+```
+- Öffne: http://localhost:8501
+- Persistenz: Modelle/Validierungen werden im Host-Ordner ./artifacts gespeichert (und beim Neustart wieder genutzt).
+
+---
 
 ## 🧠 Modelle & Metriken
 
 **Baselines:**
 - `naive` → $\hat{y}_{t+h} = y_t$
 - `seasonal_naive(m)` → $\hat{y}_{t+h} = y_{t+h-m}$
-
 - **SARIMA** (optional):  order (1,0,0) x seasonal_order (0,1,0,168) ; exog: Wochenende/Feiertag.
 - **Metriken:**
   - **MAE** 
@@ -56,7 +75,7 @@ Szenarien ändern **Historie** nachträglich:
 - **Temperatur‑Sensitivity**: ±% je °C Abweichung (linear, synthetisch).
 - **Effizienz‑Trend**: ab Datum pro Jahr ±r% (multiplikativ).
 - **Event‑Tage**: Liste von Datumswerten ±%.
-- **Netto‑Last (PV/Wind)**: synthetische Profile werden abgezogen.
+
 
 > **Interpretation:** Δ‑KPIs zeigen **Peak‑Reduktion** (MW) & **Energie‑Δ** (MWh). Ergebnisse sind **Simulationen**, keine Prognosen.
 

@@ -34,7 +34,6 @@ smard_data.py  # Daten‑Loader für SMARD
 
 - Docker Desktop (Windows/macOS) oder Docker Engine (Linux)
 - Port 8501 ist frei
-**Repository holen**
 
 **Repo holen**
 

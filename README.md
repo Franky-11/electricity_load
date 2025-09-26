@@ -18,6 +18,15 @@
 
 ---
 
+## 🖼️ Einblicke
+
+![Forecast-Ansicht – 24h Prognose](images/readme/EDA.png)
+
+![Forecast-Ansicht – 24h Prognose](images/readme/Forecast_1.png)
+
+![Qualitätscheck – Backtest-KPIs](images/readme/Forecast_2.png)
+
+---
 ## 🗂️ Projektstruktur
 
 ```

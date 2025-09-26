@@ -111,7 +111,7 @@ with welcome:
         )
 
     with right:
-        st.image("app_picture.png")
+        st.image("images/app_picture.png")
 
 with eda:
     # 1) Trendblick

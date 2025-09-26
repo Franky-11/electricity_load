@@ -8,12 +8,12 @@ font = "sans serif"
 
 # --- Server/Runtime ---
 [server]
-# Für Docker wichtig: lausche auf allen Interfaces
+# Für Docker lausche auf allen Interfaces
 address = "0.0.0.0"
 port = 8501
 headless = true
-# CORS nur deaktivieren, wenn die App hinter deinem eigenen Proxy läuft
-enableCORS = false
+# CORS Cross-Origin Resource Sharing
+enableCORS = true
 # XSRF-Schutz aktiv lassen
 enableXsrfProtection = true
 # Optional: vermeidet ständige Reruns bei Artefakt-Updates

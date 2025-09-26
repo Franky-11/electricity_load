@@ -54,8 +54,7 @@ docker compose up --build
 
 **Baselines:**
 - `naive` → $\hat{y}_{t+h} = y_t$
-- `seasonal_naive(m)`→ 
-- $\hat{y}_{t+h} = y_{t+h-m}$
+- `seasonal_naive(m)`→ $\hat{y}_{t+h} = y_t$
 - **SARIMA** (optional):  order (1,0,0) x seasonal_order (0,1,0,168) ; exog: Wochenende/Feiertag.
 - **Metriken:**
   - **MAE** 

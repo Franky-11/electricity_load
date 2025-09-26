@@ -184,6 +184,7 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
 
             fc_obj = res.get_forecast(steps=len(te), exog=Xte)
             fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
+            base = s_naive(tr, len(fc), m=m)
 
             # 4) Robust scorEN (NaN-Maske + Coverage)
             y_true = te.astype(float)
@@ -197,7 +198,8 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
             rows.append({
                 "MAE": mean_absolute_error(yt, yp),
                 "sMAPE": smape(yt, yp),
-                "MASE168": mase(yt, yp, tr, m=168),
+                "MAE_base": mean_absolute_error(yt, base[mask]),
+               # "MASE168": mase(yt, yp, tr, m=168),
             })
 
             # 5) Speicher freigeben
@@ -214,25 +216,24 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
     out = pd.DataFrame(rows)
     if len(out):
         summary = out.mean(numeric_only=True).to_frame().T
-        return summary.round(3)
+        gain=float((out["MAE_base"].mean() - out["MAE"].mean())/out["MAE_base"].mean()*100)
+        return summary.round(3),gain
     else:
         return out
 
 
 
-
-def save_validation_json(df, meta, path=VAL_PATH):
+def save_validation_json(df,gain, meta, path=VAL_PATH):
     if isinstance(df, pd.Series):
         df = df.to_frame().T
-    obj = {"meta": meta, "data": df.round(3).to_dict(orient="records")}
+    obj = {"meta": meta, "data": df.round(3).to_dict(orient="records"),"gain":gain}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 def load_validation_json(path=VAL_PATH):
     with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
-    return pd.DataFrame(obj.get("data", [])), obj.get("meta", {})
-
+    return pd.DataFrame(obj.get("data", [])), obj.get("meta", {}),obj.get("gain",5)
 
 
 
@@ -258,6 +259,72 @@ def kpi_card(title: str, value: float, unit: str = "", icon: str = "⚡", footno
       {f'<div class="kpi-foot">{footnote}</div>' if footnote else ''}
     </div>
     """, unsafe_allow_html=True)
+
+
+def kpi_card_2(title: str, value, unit: str = "", icon: str = "⚡", footnote: str | None = None):
+    st.markdown(f"""
+     <div class="kpi">
+      <div class="kpi-head"><span class="kpi-ic">{icon}</span>{title}</div>
+      <div class="kpi-val">{value}<span class="kpi-unit"> {unit}</span></div>
+      {f'<div class="kpi-foot">{footnote}</div>' if footnote else ''}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def show_last_val(df,gain):
+    st.markdown("""
+            <style>
+            :root{
+              --bg:#0b132b; --card:#0f1c2e; --border:#133046;
+              --text:#d8f3ff; --muted:#7dd3fc; --foot:#9cc3d5;
+              --pos:#22c55e; --neg:#ef4444;
+            }
+            .kpi{
+              background: linear-gradient(180deg, var(--card), var(--bg));
+              border: 1px solid var(--border);
+              border-radius: 16px;
+              padding: 16px 18px;
+              box-shadow: 0 10px 30px rgba(0,0,0,.25);
+            }
+            .kpi-head{
+              font-size: 14px; color: var(--muted);
+              display:flex; align-items:center; gap:8px; letter-spacing:.3px;
+            }
+            .kpi-ic{ font-size:16px; }
+            .kpi-val{
+              margin-top:6px; line-height:1.1;
+              font-size: 32px; font-weight: 700; color: var(--text);
+            }
+            .kpi-unit{ font-size:16px; color: var(--muted); margin-left:6px; }
+            .kpi-foot{ font-size:12px; color: var(--foot); margin-top:6px; }
+            .kpi.pos .kpi-val{ text-shadow:0 0 12px rgba(34,197,94,.35); }
+            .kpi.neg .kpi-val{ text-shadow:0 0 12px rgba(239,68,68,.35); }
+            .kpi.neu .kpi-val{ text-shadow:0 0 10px rgba(125,211,252,.25); }
+            </style>
+            """, unsafe_allow_html=True)
+
+
+    mae = float(df.get("MAE", np.nan))
+    smape = float(df.get("sMAPE", np.nan))
+
+    gate = 5.0
+    ok = (gain is not None) and (gain >= gate)
+    if gain is not None:
+        txt = f"{gain:.1f}% besser als s-Naive(168) – {'OK ✅' if ok else 'unter Gate ❗'}"
+
+    c1, c2, c3= st.columns(3)
+
+    with c1:
+        kpi_card("MAE (MWh)", mae, "MWh", icon="📉")
+
+    with c2:
+        kpi_card("sMAPE", smape, "%", icon="")
+
+    with c3:
+        kpi_card("Vorteil ggü. s-Naive",
+                 0.0 if (gain is None) else gain, "%",
+                 icon=("✅" if ok else "⚠️"),
+                 footnote=f"Gate: ≥ {gate:.0f}% · {txt}")
 
 
 """

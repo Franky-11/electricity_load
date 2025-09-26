@@ -8,7 +8,7 @@ from holidays import Germany
 
 from forecast import*
 from scenarios import*
-from smard_data import load_smard_api
+from smard_data import load_smard_api,show_data_quality
 
 pio.templates.default = "plotly_dark"
 
@@ -217,6 +217,8 @@ with eda:
 
 
 with forecast:
+    show_data_quality(s)
+    st.divider()
     st.subheader("Walk-Forward Backtesting")
     ph = st.empty()
     ph.info("Starte Validierung in der Sidebar")
@@ -227,7 +229,7 @@ with forecast:
     with st.sidebar.form("Forecast"):
         #st.markdown("Walk-Forward Backtesting")
         win_days=st.slider("Trainingsfenster (Rolling Window)",30,90,30,5)
-        eval_days=st.number_input("Anzahl Validierungstage",10,30,30,5)
+        eval_days=st.number_input("Anzahl Validierungstage",1,30,30,1)
         with_sarimax=st.checkbox("SARIMA+exog.Features testen?",value=False)
         submit=st.form_submit_button("Validierung starten")
 
@@ -240,7 +242,7 @@ with forecast:
 
         if with_sarimax:
             with st.spinner("Walk-Forward Backtesting SARIMA..."):
-                df_sarimax= eval_sarimax_rolling90_fast(s, H=24, window_days=win_days, days_to_eval=eval_days,
+                df_sarimax,gain= eval_sarimax_rolling90_fast(s, H=24, window_days=win_days, days_to_eval=eval_days,
                                                          step_hours=24)
 
                 meta = {
@@ -250,43 +252,43 @@ with forecast:
                 }
                 # lokal schreiben (persistiert lokal; in Cloud bis Neustart)
                 try:
-                    save_validation_json(df_sarimax, meta)
+                    save_validation_json(df_sarimax,gain, meta)
                 except Exception as e:
                     st.warning(f"Speicherung fehlgeschlagen: {e}")
 
 
                 # auch im RAM behalten (für die aktuelle Session)
                 st.session_state["last_val_df"] = df_sarimax
+                st.session_state["last_val_gain"] = gain
                 st.session_state["last_val_meta"] = meta
 
     if st.session_state.get("backtesting", False):
         ph.write("")
         st.markdown(f"**Baselines** | {eval_days} Tage Validierung")
         st.dataframe(st.session_state["df_base"])
-        st.divider()
-        st.markdown("Letzte Validierung **SARIMA + exog. Features**")
+        #st.divider()
+
         if "last_val_df" in st.session_state:
             df_sarimax = st.session_state["last_val_df"]
+            gain = st.session_state["last_val_gain"]
             meta = st.session_state.get("last_val_meta", {})
         else:
             try:
-                df_sarimax, meta = load_validation_json()  # aus artifacts/...
+                df_sarimax,meta,gain  = load_validation_json()  # aus artifacts/...
 
             except FileNotFoundError:
                 # Fallback: ein kleiner Platzhalter
-                df_sarimax = pd.DataFrame([[645, 1.5, 0.29, 95.2]],
-                                          columns=["MAE", "sMAPE (%)", "MASE_168", "coverage PI (%)"])
+                df_sarimax = pd.DataFrame([[1000, 2.5]],
+                                          columns=["MAE", "sMAPE (%)"])
+                gain = 5.0
                 meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90,
                         "eval_days": 30}
 
+        st.markdown("Letzte Validierung **SARIMA + exog. Features**")
+        show_last_val(df_sarimax, gain)
         st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | "
                    f"{meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | "
                    f"{meta.get('validated_at', '(kein Zeitstempel)')}")
-        st.dataframe(df_sarimax, hide_index=True)
-
-
-
-
 
     st.divider()
     #============Forecasting================================================#

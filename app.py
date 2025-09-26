@@ -229,7 +229,7 @@ with forecast:
     with st.sidebar.form("Forecast"):
         #st.markdown("Walk-Forward Backtesting")
         win_days=st.slider("Trainingsfenster (Rolling Window)",30,90,30,5)
-        eval_days=st.number_input("Anzahl Validierungstage",1,30,30,1)
+        eval_days=st.number_input("Anzahl Validierungstage",1,60,30,1)
         with_sarimax=st.checkbox("SARIMA+exog.Features testen?",value=False)
         submit=st.form_submit_button("Validierung starten")
 

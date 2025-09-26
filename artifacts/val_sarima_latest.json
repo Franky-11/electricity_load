@@ -1,18 +1,18 @@
 {
   "meta": {
-    "validated_at": "2025-09-26 11:09",
+    "validated_at": "2025-09-26 13:14",
     "order": "(1,0,0)",
     "seasonal_order": "(0,1,0,168)",
-    "train_window_days": 30,
-    "eval_days": 1,
+    "train_window_days": 90,
+    "eval_days": 60,
     "H": 24
   },
   "data": [
     {
-      "MAE": 1321.242,
-      "sMAPE": 2.226,
-      "MAE_base": 2032.208
+      "MAE": 1079.277,
+      "sMAPE": 2.148,
+      "MAE_base": 1273.326
     }
   ],
-  "gain": 34.9849322918313
+  "gain": 15.23950288740587
 }

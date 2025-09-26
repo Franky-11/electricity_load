@@ -318,6 +318,22 @@ with forecast:
 
     params_path, spec_path = resolve_params_spec()
 
+    #------------Modellkarte----------------------#
+    with c1:
+        with st.popover("📄 Model Card & Run-Metadata"):
+            # aktuelle KPIs/Gain aus der Session bevorzugen (falls QC gerade gelaufen ist)
+            # kpis = st.session_state.get("kpis", None)
+            # gain = st.session_state.get("gain", None)
+
+            meta = model_card_meta(kpis=None, gain=None)  # sammelt Spec, Validierung & Env
+            md = model_card_markdown(meta)
+
+            st.markdown(md)
+            st.download_button("⬇️ Model Card (Markdown)", md.encode("utf-8"),
+                               file_name="model_card.md", mime="text/markdown")
+
+    # ------------Modellkarte----------------------#
+
     with c1:
         if st.button("⚡ Schnell-Forecast (aktualisierte Zustände, gleiche Parameter"):
             st.session_state["filter_forecast"]=True
@@ -345,6 +361,8 @@ with forecast:
                                       line=dict(width=0), fill="tonexty",
                                       fillcolor="rgba(211,211,211,0.35)", name="PI 95% (init)"))
             st.caption(f"Order {spec['order']} | Seasonal Order {spec['seasonal_order']} | Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
+
+
 
     with c3:
         refit_days = int(st.segmented_control("Refit Tage", [30, 60, 90], default=60))
@@ -454,6 +472,9 @@ with forecast:
                      0.0 if (gain_val is None) else gain_val, "%",
                      icon=("✅" if ok else "⚠️"),
                      footnote=f"Gate: ≥ {gate:.0f}% · {txt}")
+
+
+
 
 
 

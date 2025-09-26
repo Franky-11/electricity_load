@@ -517,3 +517,91 @@ def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
     df = pd.DataFrame(rows)
     return (df[["MAE","sMAPE"]].mean().round(3),
             float((df["MAE_base"].mean() - df["MAE"].mean())/df["MAE_base"].mean()*100) if len(df) else np.nan)
+
+
+
+# --- Model Card-------------#
+
+def model_card_meta(kpis: dict | None = None, gain: float | None = None,
+                    spec_path: str = SPEC_PATH, val_path: str = VAL_PATH) -> dict:
+    meta = {}
+    # Spezifikation laden
+    try:
+        spec = json.load(open(spec_path, "r", encoding="utf-8"))
+        meta.update({
+            "order": tuple(spec.get("order", [])),
+            "seasonal_order": tuple(spec.get("seasonal_order", [])),
+            "k_exog": spec.get("k_exog"),
+            "train_window_days": spec.get("win_days"),
+            "last_refit": spec.get("last_refit")
+        })
+    except Exception:
+        pass
+    # Letzte Validierung (falls vorhanden)
+    try:
+        df, vmeta, g = load_validation_json(val_path)
+        if kpis is None and isinstance(df, pd.DataFrame) and not df.empty:
+            row = df.iloc[0]
+            kpis = {"MAE": float(row.get("MAE", np.nan)),
+                    "sMAPE": float(row.get("sMAPE", np.nan))}
+        if gain is None:
+            gain = g
+        meta["validated_at"] = vmeta.get("validated_at")
+        meta["eval_days"] = vmeta.get("eval_days")
+        meta["H"] = vmeta.get("H", 24)
+    except Exception:
+        pass
+    # Runtime-Umgebung
+    import sys, platform
+    try:
+        import statsmodels as sm
+        smv = sm.__version__
+    except Exception:
+        smv = "?"
+    meta["env"] = {
+        "python": sys.version.split()[0],
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
+        "statsmodels": smv,
+        "platform": platform.system()
+    }
+    if kpis is not None: meta["kpis"] = kpis
+    if gain is not None: meta["gain"] = gain
+    return meta
+
+
+def model_card_markdown(meta: dict) -> str:
+    def fmt(v):
+        if v is None: return "—"
+        if isinstance(v, float) and np.isnan(v): return "—"
+        return str(v)
+    k = meta.get("kpis", {})
+    g = meta.get("gain", None)
+    gtxt = "—" if g is None or (isinstance(g, float) and np.isnan(g)) else f"{g:.1f}%"
+    lines = [
+        "# Model Card – SARIMA",
+        "## Spec",
+        f"- order: `{meta.get('order', '—')}`",
+        f"- seasonal_order: `{meta.get('seasonal_order', '—')}`",
+        f"- k_exog: {fmt(meta.get('k_exog'))}",
+        f"- train_window_days: {fmt(meta.get('train_window_days'))}",
+        f"- last_refit: {fmt(meta.get('last_refit'))}",
+        "## Validation (letzte)",
+        f"- validated_at: {fmt(meta.get('validated_at'))}",
+        f"- horizon H: {fmt(meta.get('H'))}",
+        f"- eval_days: {fmt(meta.get('eval_days'))}",
+        f"- MAE: {fmt(k.get('MAE'))}",
+        f"- sMAPE: {fmt(k.get('sMAPE'))}",
+        f"- Vorteil ggü. s-Naive(168): {gtxt}",
+        "## Environment",
+        f"- python: {meta['env'].get('python', '—')}",
+        f"- numpy: {meta['env'].get('numpy', '—')}",
+        f"- pandas: {meta['env'].get('pandas', '—')}",
+        f"- statsmodels: {meta['env'].get('statsmodels', '—')}",
+        f"- platform: {meta['env'].get('platform', '—')}",
+        "## Files",
+        f"- params: `{PARAM_PATH}`",
+        f"- spec: `{SPEC_PATH}`",
+        f"- validation: `{VAL_PATH}`",
+    ]
+    return "\n".join(lines)

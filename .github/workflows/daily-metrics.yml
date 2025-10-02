@@ -2,9 +2,10 @@
 name: daily-metrics
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '10 9 * * *'  # every day at 09:10 UTC
-  workflow_dispatch:
+
 
 jobs:
   compute-and-store-metrics:
@@ -30,3 +31,6 @@ jobs:
           git add artifacts/metrics.csv artifacts/forecasts/*.csv || true
           git commit -m "chore: update metrics & saved forecasts" || echo "No changes to commit"
           git push || echo "Push skipped (no permission on PRs)"
+
+permissions:
+  contents: write

@@ -86,7 +86,7 @@ if compare_prev:
 #===========================================================================#
 
 st.title("⚡ Stromverbrauch Deutschland")
-welcome,eda,forecast,scenarios=st.tabs(["Home","EDA","Forecast","Szenarien"])
+welcome,eda,forecast,ops,scenarios=st.tabs(["Home","EDA","Forecast","Ops","Szenarien"])
 
 with welcome:
     left,space, right = st.columns([1.25,0.2, 1])
@@ -615,3 +615,23 @@ with scenarios:
     fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="MWh",
                       legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig6, use_container_width=True)
+
+with ops:
+    st.subheader("📈 Ops / Monitoring")
+    st.caption("MAE/sMAPE der letzten Forecast-Läufe (aus artifacts/metrics.csv)")
+    import pandas as pd, os
+    METRICS_CSV = os.path.join(os.environ.get("ARTIFACTS_DIR", "artifacts"), "metrics.csv")
+    if not os.path.exists(METRICS_CSV):
+        st.info("Noch keine Metriken vorhanden. CI-Job 'metrics_job.py' täglich ausführen, um zu befüllen.")
+    else:
+        m = pd.read_csv(METRICS_CSV, parse_dates=["forecast_issue", "scored_at"])
+        m = m.sort_values("forecast_issue")
+        st.dataframe(m.tail(30), use_container_width=True)
+        col1,col2=st.columns(2)
+        with col1:
+            fig = px.line(m, x="forecast_issue", y=["MAE","sMAPE"], title="Historie: MAE / sMAPE")
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            fig = px.line(m, x="forecast_issue",y="Gain",title="MAE Gain SARIMA vs. s_naive")
+
+

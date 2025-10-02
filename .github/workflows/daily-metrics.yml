@@ -14,6 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                 # ← volle History, damit pull --rebase klappt
+          ref: ${{ github.ref }}         # ← checkt genau die Branch/den Commit dieses Runs aus
+          persist-credentials: true      # ← GITHUB_TOKEN bleibt für git push konfiguriert
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -28,9 +32,15 @@ jobs:
           python metrics_job.py
       - name: Commit artifacts (metrics + saved forecasts)
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A artifacts                  
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git add -A artifacts 
+          git status
           git commit -m "chore: update metrics & saved forecasts" || echo "No changes to commit"
-          git push || echo "Push skipped (no permission on PRs)"
+          git push origin "${GITHUB_REF_NAME}"
+          
+          
+          
 

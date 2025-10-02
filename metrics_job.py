@@ -80,7 +80,8 @@ def _read_last_unscored_forecast(now_loc: pd.Timestamp) -> Optional[Path]:
             continue
         if f.name in already:
             continue
-        if (now_loc - issue) >= pd.Timedelta(hours=24):
+        #if (now_loc - issue) >= pd.Timedelta(hours=24):
+        if (now_loc - issue) >= pd.Timedelta(minutes=5):  # zum testen
             cand.append((issue, f))
     if not cand:
         return None

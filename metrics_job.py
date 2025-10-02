@@ -102,7 +102,7 @@ def evaluate_yesterday_and_save_today():
     fpath = _read_last_unscored_forecast(now_loc)
     if fpath is not None:
         fc = pd.read_csv(fpath, parse_dates=["ts"]).set_index("ts")
-        fc.index = fc.index.tz_localize("Europe/Berlin")
+        fc.index = fc.index.tz_convert("Europe/Berlin")
         # columns: yhat, optional PI columns
         s = load_smard_api(years=1).tz_convert("Europe/Berlin")
         y_true = s.reindex(fc.index)

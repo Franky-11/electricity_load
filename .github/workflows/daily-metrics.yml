@@ -1,6 +1,9 @@
 
 name: daily-metrics
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   schedule:
@@ -32,5 +35,3 @@ jobs:
           git commit -m "chore: update metrics & saved forecasts" || echo "No changes to commit"
           git push || echo "Push skipped (no permission on PRs)"
 
-permissions:
-  contents: write

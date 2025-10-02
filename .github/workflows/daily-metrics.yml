@@ -1,6 +1,9 @@
 name: daily-metrics
 
 on:
+  push:
+    branches:
+      - feature_monitoring
   workflow_dispatch:
   schedule:
     - cron: '15 09 * * *'

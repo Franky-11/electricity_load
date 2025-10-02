@@ -1,14 +1,15 @@
 
 name: daily-metrics
 
-permissions:
-  contents: write
-
 on:
   workflow_dispatch:
+  push:
+    branches: ["feature/**", "feature/monitoring"]
   schedule:
-    - cron: '10 9 * * *'  # every day at 09:10 UTC
+    - cron: '15 09 * * *'
 
+permissions:
+  contents: write
 
 jobs:
   compute-and-store-metrics:

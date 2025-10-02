@@ -23,11 +23,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run metrics job v2 (score yesterday, issue today)
+      - name: Run metrics job  (score yesterday, issue today)
         env:
           ARTIFACTS_DIR: artifacts
         run: |
-          python metrics_job_v2.py
+          python metrics_job.py
       - name: Commit artifacts (metrics + saved forecasts)
         run: |
           git config user.name "github-actions[bot]"

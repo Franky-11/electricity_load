@@ -619,8 +619,10 @@ with scenarios:
 with ops:
     st.subheader("📈 Ops / Monitoring")
     st.caption("MAE/sMAPE der letzten Forecast-Läufe (aus artifacts/metrics.csv)")
-    import pandas as pd, os
+
     METRICS_CSV = os.path.join(os.environ.get("ARTIFACTS_DIR", "artifacts"), "metrics.csv")
+
+
     if not os.path.exists(METRICS_CSV):
         st.info("Noch keine Metriken vorhanden. CI-Job 'metrics_job.py' täglich ausführen, um zu befüllen.")
     else:
@@ -633,5 +635,40 @@ with ops:
             st.plotly_chart(fig, use_container_width=True)
         with col2:
             fig = px.line(m, x="forecast_issue",y="Gain",title="MAE Gain SARIMA vs. s_naive")
+
+            # Ampel/Tacho für den jüngsten Gain
+            last = m.dropna(subset=["Gain"]).tail(1)
+            if last.empty:
+                st.info("Kein 'Gain' vorhanden (noch keine Bewertung).")
+            else:
+                gain = float(last["Gain"].iloc[0])
+
+                gmin, gmax = -10, 30
+                gauge = go.Figure(go.Indicator(
+                    mode="gauge+number+delta",
+                    value=gain,
+                    number={"suffix": "%"},
+                    delta={"reference": 0},
+                    gauge={
+                        "axis": {"range": [gmin, gmax]},
+                        "bar": {"color": "black"},
+                        "steps": [
+                            {"range": [gmin, 5], "color": "#f94144"},  # rot
+                            {"range": [5, 10], "color": "#f9c74f"},  # gelb
+                            {"range": [10, gmax], "color": "#43aa8b"},  # grün
+                        ],
+                        "threshold": {"line": {"color": "black", "width": 4}, "value": gain},
+                    },
+                    title={"text": "Aktueller Gain vs. s_naive"}
+                ))
+                st.plotly_chart(gauge, use_container_width=True)
+
+                # Ampel-Status
+                if gain < 5:
+                    st.error(f"🔴 Gain {gain:.1f}% — unter Gate (≥5%)")
+                elif gain < 10:
+                    st.warning(f"🟡 Gain {gain:.1f}% — Zwischenbereich (5–10%)")
+                else:
+                    st.success(f"🟢 Gain {gain:.1f}% — ok (≥10%)")
 
 

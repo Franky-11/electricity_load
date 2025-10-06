@@ -19,9 +19,14 @@ SPEC_PATH  = os.path.join(ARTIFACTS_DIR, "sarima_spec.json")
 def _save_forecast_csv(yhat_loc: pd.Series,
                        pi_loc: Optional[pd.DataFrame],
                        issue_ts: pd.Timestamp,
-                       spec_path=SPEC_PATH) -> Path:
+                       spec_path=SPEC_PATH,
+                       base_loc: Optional[pd.Series] = None) -> Path:
 
     df = pd.DataFrame({"yhat": yhat_loc})
+
+    if base_loc is not None:
+        df["yhat_snaive"] = base_loc
+
     if pi_loc is not None and not pi_loc.empty:
         for c in pi_loc.columns: df[c] = pi_loc[c]
 
@@ -80,8 +85,8 @@ def _read_last_unscored_forecast(now_loc: pd.Timestamp) -> Optional[Path]:
             continue
         if f.name in already:
             continue
-        #if (now_loc - issue) >= pd.Timedelta(hours=24):
-        if (now_loc - issue) >= pd.Timedelta(minutes=5):  # zum testen
+        if (now_loc - issue) >= pd.Timedelta(hours=24):
+       # if (now_loc - issue) >= pd.Timedelta(minutes=5):  # zum testen
             cand.append((issue, f))
     if not cand:
         return None
@@ -95,47 +100,112 @@ def _append_metrics_row(row: dict):
         df = pd.concat([old, df], ignore_index=True)
     df.to_csv(METRICS_CSV, index=False)
 
+
+META_COLS_FLAT = [
+    "k_exog", "train_window_days", "last_refit", "spec_sha256"
+]
+
+def _extract_meta_from_forecast(fc: pd.DataFrame, fpath: Path) -> dict:
+    """
+    Holt Meta-Infos aus der Forecast-CSV.
+
+    """
+    out = {}
+
+    # 1) Direkt übernommene Felder
+    for c in META_COLS_FLAT:
+        if c in fc.columns:
+            out[c] = fc[c].iloc[0]
+
+    # 2) order / seasonal_order aus JSON-String parsen (wenn vorhanden)
+    def _parse_list(val):
+        if isinstance(val, str):
+            try:
+                return json.loads(val)               # "[1,1,1]" -> [1,1,1]
+            except Exception:
+                # zur Not aus "(1,1,1)" machen:
+                try:
+                    return json.loads(val.replace("(", "[").replace(")", "]"))
+                except Exception:
+                    return None
+        return val
+
+    if "order" in fc.columns:
+        o = _parse_list(fc["order"].iloc[0])
+        if isinstance(o, (list, tuple)):
+            o = list(o) + [None, None, None]  # auffüllen
+            out["order"]   = f"({o[0]},{o[1]},{o[2]})"
+            out["order_p"] = o[0]; out["order_d"] = o[1]; out["order_q"] = o[2]
+
+    if "seasonal_order" in fc.columns:
+        so = _parse_list(fc["seasonal_order"].iloc[0])
+        if isinstance(so, (list, tuple)):
+            so = list(so) + [None, None, None, None]
+            out["seasonal_order"] = f"({so[0]},{so[1]},{so[2]},{so[3]})"
+            out["seasonal_P"] = so[0]; out["seasonal_D"] = so[1]
+            out["seasonal_Q"] = so[2]; out["seasonal_m"] = so[3]
+
+    return out
+
+
+
 def evaluate_yesterday_and_save_today():
     now_loc = pd.Timestamp.now(tz="Europe/Berlin")
-
-    # 1) EVALUATE: find last unscored forecast (>=24h old)
     fpath = _read_last_unscored_forecast(now_loc)
     if fpath is not None:
         fc = pd.read_csv(fpath, parse_dates=["ts"]).set_index("ts")
         fc.index = fc.index.tz_convert("Europe/Berlin")
-        # columns: yhat, optional PI columns
-        s = load_smard_api(years=1).tz_convert("Europe/Berlin")
+
+        # Ist-Werte (lokal) laden
+        s = load_smard_api(years=1)
         y_true = s.reindex(fc.index)
-        mask = (~y_true.isna()) & (~fc["yhat"].isna())
-        cov = int(mask.sum())
-        mae = float(mean_absolute_error(y_true[mask], fc["yhat"][mask])) if cov > 0 else np.nan
-        sm = float(smape(y_true[mask], fc["yhat"][mask])) if cov > 0 else np.nan
-        base =s_naive(s, len(fc), m=168)
-        mae_base= float(mean_absolute_error(y_true[mask], base[mask]))
-        gain = float((mae_base- mae) / mae_base * 100) if cov > 0 else np.nan
+
+        # Inner Join / Intersection (keine NaNs)
+        cols = {"y_true": y_true, "yhat": fc.get("yhat")}
+        if "yhat_snaive" in fc.columns:
+            cols["yhat_snaive"] = fc["yhat_snaive"]
+
+        aligned = pd.concat(cols, axis=1).dropna()
+        cov = len(aligned)
+
+        if cov > 0:
+            mae = mean_absolute_error(aligned.y_true, aligned.yhat)
+            sm = smape(aligned.y_true, aligned.yhat)
+            if "yhat_snaive" in aligned:
+                mae_base = mean_absolute_error(aligned.y_true, aligned.yhat_snaive)
+                gain = (mae_base - mae) / (mae_base + 1e-12) * 100
+            else:
+                mae_base = np.nan
+                gain = np.nan
+        else:
+            mae = sm = mae_base = gain = np.nan
 
         row = {
             "scored_at": now_loc.strftime("%Y-%m-%d %H:%M"),
             "forecast_file": fpath.name,
             "forecast_issue": fpath.stem.replace("_", " "),
             "points_compared": cov,
-            "MAE": round(mae, 3) if cov > 0 else np.nan,
-            "sMAPE": round(sm, 3) if cov > 0 else np.nan,
-            "MAE_base": round(mae_base, 3) if cov > 0 else np.nan,
-            "Gain": round(gain, 1) if cov > 0 else np.nan
+            "MAE": round(float(mae), 3) if cov else np.nan,
+            "sMAPE": round(float(sm), 3) if cov else np.nan,
+            "MAE_base": round(float(mae_base), 3) if cov else np.nan,
+            "Gain": round(float(gain), 1) if cov else np.nan,
         }
 
-        meta_cols = ["order", "seasonal_order", "k_exog", "train_window_days", "last_refit", "spec_sha256"]
-        row.update({c: (str(fc[c].iloc[0]) if c in fc.columns else None) for c in meta_cols})
+        row.update(_extract_meta_from_forecast(fc, fpath))
 
         _append_metrics_row(row)
-        print(f"Scored {fpath.name} with coverage={cov}")
+        print(f"Scored {fpath.name} (coverage={cov})")
 
     # 2) ISSUE TODAY: generate today's forecast and save it for tomorrow's evaluation
     s = load_smard_api(years=1)
-    yhat_utc, pi_utc = forecast_from_params(s, H=24)
+    spec = json.load(open(SPEC_PATH, "r", encoding="utf-8"))
+    yhat_utc, pi_utc = forecast_from_params(s, H=24,win_days=spec["win_days"])
     yhat_loc, pi_loc = to_local(yhat_utc, pi_utc)
-    path = _save_forecast_csv(yhat_loc, pi_loc, now_loc)
+
+    #seas_naive forecast
+    base_loc=s_naive(s,len(yhat_loc),m=168)
+
+    path = _save_forecast_csv(yhat_loc, pi_loc, now_loc,base_loc=base_loc)
     print(f"Issued forecast and saved to {path}")
 
 if __name__ == "__main__":

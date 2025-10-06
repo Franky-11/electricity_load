@@ -5,3 +5,4 @@ artifacts/*
 !artifacts/metrics.csv
 !artifacts/.gitkeep
 .env
+.github

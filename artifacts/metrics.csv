@@ -1,0 +1,2 @@
+scored_at,forecast_file,forecast_issue,points_compared,MAE,sMAPE,MAE_base,Gain,k_exog,train_window_days,last_refit,spec_sha256,order,order_p,order_d,order_q,seasonal_order,seasonal_P,seasonal_D,seasonal_Q,seasonal_m
+2025-10-07 10:37,2025-10-06_1012.csv,2025-10-06 1012,24,1176.909,1.976,2061.646,42.9,2,90,2025-09-26 15:23:52,79f92e6e9b4d,"(1,0,0)",1,0,0,"(0,1,0,168)",0,1,0,168

@@ -1,0 +1,53 @@
+name: daily-metrics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 08 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  compute-and-store-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                  # volle History -> rebase/pull möglich
+          ref: ${{ github.ref }}          # checkt genau die Branch dieses Runs aus
+          persist-credentials: true       # erlaubt späteres git push
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run metrics job  (score yesterday, issue today)
+        env:
+          ARTIFACTS_DIR: artifacts
+        run: |
+          python metrics_job.py
+
+      - name: Commit artifacts (metrics + saved forecasts)
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 1) Remote-Stand holen (verhindert 'fetch first')
+          git fetch origin ${{ github.ref_name }}
+          git rebase origin/${{ github.ref_name }} || true
+
+          # 2) Artefakte hinzufügen – FORCE (ignoriert .gitignore)
+          git add -A artifacts
+
+          git status
+          git commit -m "chore: update metrics & saved forecasts" || echo "No changes to commit"
+
+          # 3) Exakt in diese Branch pushen
+          git push origin HEAD:${{ github.ref_name }}

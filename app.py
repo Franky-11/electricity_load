@@ -337,16 +337,17 @@ with forecast:
 
     with c1:
         if st.button("⚡ Schnell-Forecast (aktualisierte Zustände, gleiche Parameter"):
-            st.session_state["filter_forecast"]=True
-            st.session_state["refit"] = False
-            try:
-                spec = json.load(open(spec_path, "r", encoding="utf-8"))
-                yhat, pi = forecast_from_params(s, H=24,win_days=spec["win_days"], params_path=params_path, spec_path=spec_path)
-                yhat_loc, pi_loc = to_local(yhat, pi)
-                st.session_state["yhat"] = yhat_loc
-                st.session_state["pi"] = pi_loc
-            except Exception as e:
-                st.warning(f"Initialmodell nicht ladbar: {e}")
+            with st.spinner("Forecast läuft..."):
+                st.session_state["filter_forecast"]=True
+                st.session_state["refit"] = False
+                try:
+                    spec = json.load(open(spec_path, "r", encoding="utf-8"))
+                    yhat, pi = forecast_from_params(s, H=24,win_days=spec["win_days"], params_path=params_path, spec_path=spec_path)
+                    yhat_loc, pi_loc = to_local(yhat, pi)
+                    st.session_state["yhat"] = yhat_loc
+                    st.session_state["pi"] = pi_loc
+                except Exception as e:
+                    st.warning(f"Initialmodell nicht ladbar: {e}")
 
         if st.session_state["filter_forecast"]:
 

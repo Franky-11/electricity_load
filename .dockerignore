@@ -6,3 +6,4 @@ artifacts/*
 !artifacts/.gitkeep
 .env
 .github
+images/readme/*

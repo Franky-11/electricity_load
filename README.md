@@ -1,6 +1,9 @@
 # Stromlast‑Forecast DE
-> Interaktive Web‑App für **EDA**, **Baselines/Backtesting**, optional **SARIMA(+exog)** und **What‑if‑Szenarien** auf **stündlichen** Stromlastdaten (TZ: *Europe/Berlin*).
-
+> Dieses Projekt prognostiziert die stündliche Stromlast 
+> (Kurzfrist-Horizon: 24 h). Ziel ist, Day-Ahead/Intraday-Mengen verlässlicher zu planen und Transparenz über Prognoseunsicherheit zu schaffen. Die Lösung kombiniert einfache Baselines (seasonal-naive) mit einem SARIMA-Modell, 
+> bewertet täglich per MAE/sMAPE und Promotion-Gate (Vorteil ggü. Baseline), 
+> speichert Artefakte reproduzierbar und überwacht die 
+> Modellgüte im Ops-Tab.
 
 ## ✨ Features
 

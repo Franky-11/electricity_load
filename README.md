@@ -8,6 +8,7 @@
 - **Baselines & Backtesting**: Naive / Seasonal‑Naive (m=24/168) / Drift; Walk‑Forward mit fixem Horizont.
 - **Metriken**: **MAE**, **sMAPE**, **MASE (168h)**.
 - **SARIMA (+exogene Kalender‑Features)**: optional.
+- **Daily-Metrics-Job**: Forecasting und Scoring via Github-Actions, Monitoring Modell-Metriken 
 - **What‑if Szenarien** (Post‑Processing):
   - Feiertag/Weekend‑Multiplikator,
   - Peak→Off‑Peak‑Verschiebung (Demand Response),

@@ -3,6 +3,7 @@ import streamlit as st
 
 import plotly.graph_objects as go
 import plotly.express as px
+
 import plotly.io as pio
 from holidays import Germany
 
@@ -622,20 +623,25 @@ with ops:
 
     METRICS_CSV = os.path.join(os.environ.get("ARTIFACTS_DIR", "artifacts"), "metrics.csv")
 
-
     if not os.path.exists(METRICS_CSV):
         st.info("Noch keine Metriken vorhanden. CI-Job 'metrics_job.py' täglich ausführen, um zu befüllen.")
     else:
         m = pd.read_csv(METRICS_CSV, parse_dates=["forecast_issue", "scored_at"])
         m = m.sort_values("forecast_issue")
         st.dataframe(m.tail(30), use_container_width=True)
-        col1,col2=st.columns(2)
+        col1,col2,col3=st.columns(3)
         with col1:
-            fig = px.line(m, x="forecast_issue", y=["MAE","sMAPE"], title="Historie: MAE / sMAPE")
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            fig = px.line(m, x="forecast_issue",y="Gain",title="MAE Gain SARIMA vs. s_naive")
+            fig=px.area(m,x="forecast_issue",y="sMAPE")
+            fig.update_traces(line=dict(color="#133046", width=2))
 
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            fig = px.area(m, x="forecast_issue",y="Gain")
+            fig.update_traces(line=dict(color="#133046", width=2))
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col3:
             # Ampel/Tacho für den jüngsten Gain
             last = m.dropna(subset=["Gain"]).tail(1)
             if last.empty:

@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.io as pio
 from holidays import Germany
 
+
 from forecast import*
 from scenarios import*
 from smard_data import load_smard_api,show_data_quality
@@ -145,7 +146,7 @@ with eda:
     )
     fig1.update_yaxes(title_text="Verbrauch MWh")
 
-    st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1,width="stretch")
 
     st.write("")
 
@@ -171,7 +172,7 @@ with eda:
                            height=320, margin=dict(l=40, r=20, t=60, b=30), hovermode="x unified",
                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
         fig2.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     with col2:
         # ---------- Chart 3: Mittelwert je Wochentag ----------
@@ -192,7 +193,7 @@ with eda:
         fig3.update_layout(title="Mittelwert je Wochentag", barmode="group",
                            height=320, margin=dict(l=40, r=20, t=60, b=30))
         fig3.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, width="stretch")
 
     with col3:
         # ---------- Chart 4: Mittelwert je Monat ----------
@@ -214,7 +215,7 @@ with eda:
         fig4.update_xaxes(tickmode="array", tickvals=xmonths, ticktext=month_names)
         fig4.update_layout(title="Mittelwert je Monat", height=320, margin=dict(l=40, r=20, t=60, b=30))
         fig4.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4, width="stretch")
 
 
 with forecast:
@@ -423,7 +424,7 @@ with forecast:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
     )
 
-    st.plotly_chart(fig5, use_container_width=True)
+    st.plotly_chart(fig5, width="stretch")
 
     #== Backtesting aktuelles Modell==================#
     if "qcheck" not in st.session_state:
@@ -616,7 +617,7 @@ with scenarios:
 
     fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="MWh",
                       legend=dict(orientation="h", y=1.1))
-    st.plotly_chart(fig6, use_container_width=True)
+    st.plotly_chart(fig6, width="stretch")
 
 with ops:
     st.subheader("📈 Ops / Monitoring")
@@ -635,12 +636,12 @@ with ops:
             fig=px.area(m,x="forecast_issue",y="sMAPE")
             fig.update_traces(line=dict(color="#133046", width=2))
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with col2:
             fig = px.area(m, x="forecast_issue",y="Gain")
             fig.update_traces(line=dict(color="#133046", width=2))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with col3:
             # Ampel/Tacho für den jüngsten Gain
@@ -668,7 +669,7 @@ with ops:
                     },
                     title={"text": "Aktueller Gain vs. s_naive"}
                 ))
-                st.plotly_chart(gauge, use_container_width=True)
+                st.plotly_chart(gauge, width="stretch")
 
                 # Ampel-Status
                 if gain < 5:

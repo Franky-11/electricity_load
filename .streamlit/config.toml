@@ -17,7 +17,7 @@ enableCORS = true
 # XSRF-Schutz aktiv lassen
 enableXsrfProtection = true
 # Optional: vermeidet ständige Reruns bei Artefakt-Updates
-folderWatchingBlacklist = ["artifacts", ".git", ".venv", "__pycache__"]
+#folderWatchingBlacklist = ["artifacts", ".git", ".venv", "__pycache__"]
 
 # --- Client/UI ---
 [client]

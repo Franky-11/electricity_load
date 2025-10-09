@@ -28,7 +28,7 @@
 
 ![Qualitätscheck – Backtest-KPIs](images/readme/Forecast_2.png)
 
-![Forecast-Ansicht – 24h Prognose](images/readme/ops_monitoring.png)
+![ops_monitoring](images/readme/ops_monitoring.png)
 
 ---
 ## 🗂️ Projektstruktur

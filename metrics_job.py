@@ -66,32 +66,46 @@ def _save_forecast_csv(yhat_loc: pd.Series,
         pass
     return path
 
-
-def _read_last_unscored_forecast(now_loc: pd.Timestamp) -> Optional[Path]:
-    # Pick the most recent forecast file whose issue time is at least 24 hours in the past
-    # and that is not yet present in metrics.csv (by filename).
-    files = sorted(FORECAST_DIR.glob("*.csv"))
-    if not files:
-        return None
-    df_m = pd.read_csv(METRICS_CSV) if METRICS_CSV.exists() else pd.DataFrame(columns=["forecast_file"])
-    already = set(df_m.get("forecast_file", pd.Series(dtype=str)).tolist())
-    cand = []
-    for f in files:
-        # parse 'YYYY-MM-DD_HHMM.csv'
-        stem = f.stem
+def _pick_forecast_to_score(now_loc: pd.Timestamp) -> Optional[Path]:
+    """Wähle die letzte Forecast-CSV für 'gestern' (Europe/Berlin).
+    Fallback: wenn keine für gestern existiert, nimm die jüngste ungescorte vor gestern.
+    """
+    files = []
+    for f in FORECAST_DIR.glob("*.csv"):
         try:
-            issue = pd.to_datetime(stem, format="%Y-%m-%d_%H%M").tz_localize("Europe/Berlin")
+            issue = pd.to_datetime(f.stem, format="%Y-%m-%d_%H%M").tz_localize("Europe/Berlin")
+            files.append((issue, f))
         except Exception:
             continue
-        if f.name in already:
-            continue
-        if (now_loc - issue) >= pd.Timedelta(hours=24):
-       # if (now_loc - issue) >= pd.Timedelta(minutes=5):  # zum testen
-            cand.append((issue, f))
-    if not cand:
+    if not files:
         return None
-    cand.sort(key=lambda x: x[0], reverse=True)
-    return cand[0][1]
+
+    # bereits gescorte aus metrics.csv filtern
+    df_m = pd.read_csv(METRICS_CSV) if METRICS_CSV.exists() else pd.DataFrame(columns=["forecast_file"])
+    already = set(df_m.get("forecast_file", pd.Series(dtype=str)).tolist())
+
+    yday = (now_loc - pd.Timedelta(days=1)).date()
+
+    # 1) Kandidaten für gestern, jüngste Uhrzeit zuerst
+    cand_yday = sorted(
+        [(iss, f) for iss, f in files if f.name not in already and iss.date() == yday],
+        key=lambda x: x[0], reverse=True
+    )
+    if cand_yday:
+        return cand_yday[0][1]
+
+    # 2) Fallback: jüngste ungescorte vor gestern
+    cand_older = sorted(
+        [(iss, f) for iss, f in files if f.name not in already and iss.date() < yday],
+        key=lambda x: x[0], reverse=True
+    )
+    return cand_older[0][1] if cand_older else None
+
+
+
+
+
+
 
 def _append_metrics_row(row: dict):
     df = pd.DataFrame([row])
@@ -151,7 +165,7 @@ def _extract_meta_from_forecast(fc: pd.DataFrame, fpath: Path) -> dict:
 
 def evaluate_yesterday_and_save_today():
     now_loc = pd.Timestamp.now(tz="Europe/Berlin")
-    fpath = _read_last_unscored_forecast(now_loc)
+    fpath = _pick_forecast_to_score(now_loc)
     if fpath is not None:
         fc = pd.read_csv(fpath, parse_dates=["ts"]).set_index("ts")
         fc.index = fc.index.tz_convert("Europe/Berlin")

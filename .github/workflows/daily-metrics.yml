@@ -3,7 +3,7 @@ name: daily-metrics
 on:
   workflow_dispatch:
   schedule:
-    - cron: '45 10 * * *'
+    - cron: '00 18 * * *'
 
 permissions:
   contents: write

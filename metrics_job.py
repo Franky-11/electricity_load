@@ -161,14 +161,48 @@ def _extract_meta_from_forecast(fc: pd.DataFrame, fpath: Path) -> dict:
 
     return out
 
+def _read_forecast(fpath: Path) -> pd.DataFrame:
+    # robustes Einlesen mit DST-Sicherheit
+    df = pd.read_csv(fpath)
+
+    if "ts" in df.columns:
+        ts = pd.to_datetime(df["ts"], utc=True, errors="coerce")  # immer erst nach UTC parsen
+        if ts.isna().any():
+            # Fallback: ohne UTC parsen und später lokalisieren (für alte Dateien)
+            ts = pd.to_datetime(df["ts"], errors="coerce")
+        df = df.drop(columns=["ts"])
+        df.index = ts
+        df.index.name = "ts"
+    else:
+        # sehr alte Dateien: Index ist ts
+        df = pd.read_csv(fpath, index_col=0)
+        df.index.name = "ts"
+        df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+
+    # Wenn noch tz-naiv -> als Berlin lokalisieren (DST sicher)
+    if getattr(df.index, "tz", None) is None:
+        df.index = pd.to_datetime(df.index, errors="coerce")
+        df.index = df.index.tz_localize(
+            "Europe/Berlin",
+            ambiguous="infer",           # Fall-Back nach der Zeitumstellung (doppelte Stunde)
+            nonexistent="shift_forward", # Spring-Forward
+        )
+    else:
+        # bereits tz-aware (UTC oder Offset) -> nach Berlin konvertieren
+        df.index = df.index.tz_convert("Europe/Berlin")
+
+    # optional: doppelte Timestamps (Sommer→Winter) konsolidieren
+    if df.index.has_duplicates:
+        df = df[~df.index.duplicated(keep="last")]
+
+    return df
 
 
 def evaluate_yesterday_and_save_today():
     now_loc = pd.Timestamp.now(tz="Europe/Berlin")
     fpath = _pick_forecast_to_score(now_loc)
     if fpath is not None:
-        fc = pd.read_csv(fpath, parse_dates=["ts"]).set_index("ts")
-        fc.index = fc.index.tz_convert("Europe/Berlin")
+        fc = _read_forecast(fpath)
 
         # Ist-Werte (lokal) laden
         s = load_smard_api(years=1)

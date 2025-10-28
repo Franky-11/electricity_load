@@ -28,7 +28,7 @@
 
 ![Qualitätscheck – Backtest-KPIs](images/readme/Forecast_2.png)
 
-
+![Ops-Tab](images/readme/Ops_tab.png)
 
 
 ---

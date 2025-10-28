@@ -630,17 +630,30 @@ with ops:
     else:
         m = pd.read_csv(METRICS_CSV, parse_dates=["forecast_issue", "scored_at"])
         m = m.sort_values("forecast_issue")
-        st.dataframe(m.tail(30), use_container_width=True)
+        st.dataframe(m.tail(7), use_container_width=True)
         col1,col2,col3=st.columns(3)
         with col1:
             fig=px.area(m,x="forecast_issue",y="sMAPE")
             fig.update_traces(line=dict(color="#133046", width=2))
 
+            # Moving Average für den letzten sMAPE 7d
+            ma_7d_sMAPE=m["sMAPE"].rolling(7, min_periods=3).mean()
+            ma_7d_sMAPE.index=m["forecast_issue"]
+            fig.add_trace(
+                go.Scatter(x=ma_7d_sMAPE.index, y=ma_7d_sMAPE.values, mode="lines", line=dict(color="white", width=2, dash="solid"),
+                           name="7d MA sMAPE"))
+
             st.plotly_chart(fig, width="stretch")
 
         with col2:
-            fig = px.area(m, x="forecast_issue",y="Gain")
-            fig.update_traces(line=dict(color="#133046", width=2))
+
+            fig = px.area(m, x="forecast_issue",y="Gain",color_discrete_sequence=["#133046"])
+            # Moving Average für den letzten Gain 7d
+            ma_7d=m["Gain"].rolling(7, min_periods=3).mean()
+            ma_7d.index=m["forecast_issue"]
+            fig.add_trace(go.Scatter(x=ma_7d.index, y=ma_7d.values,mode="lines",line=dict(color="white", width=2, dash="solid"),name="7d MA Gain"))
+
+
             st.plotly_chart(fig, width="stretch")
 
         with col3:

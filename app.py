@@ -662,7 +662,7 @@ with ops:
             if last.empty:
                 st.info("Kein 'Gain' vorhanden (noch keine Bewertung).")
             else:
-                gain = float(last["Gain"].iloc[0])
+                gain = float(ma_7d.values[-1])
 
                 gmin, gmax = -10, 30
                 gauge = go.Figure(go.Indicator(
@@ -680,7 +680,7 @@ with ops:
                         ],
                         "threshold": {"line": {"color": "black", "width": 4}, "value": gain},
                     },
-                    title={"text": "Aktueller Gain vs. s_naive"}
+                    title={"text": "Gain MA 7d vs. s_naive"}
                 ))
                 st.plotly_chart(gauge, width="stretch")
 

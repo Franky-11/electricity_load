@@ -27,8 +27,8 @@
 ![Forecast-Ansicht – 24h Prognose](images/readme/EDA.png)
 
 ![Qualitätscheck – Backtest-KPIs](images/readme/Forecast_2.png)
-
 ![ops_monitoring](images/readme/ops_monitoring.png)
+
 
 ---
 ## 🗂️ Projektstruktur

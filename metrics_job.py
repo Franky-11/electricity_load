@@ -1,14 +1,20 @@
 
-import os
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent
+SRC_DIR = ROOT_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import pandas as pd
 import numpy as np
 from typing import Optional
 import json, hashlib
 
-from config import ARTIFACTS_DIR, METRICS_CSV, SPEC_PATH
-from forecast import forecast_from_params, to_local, smape,s_naive
-from smard_data import load_smard_api
+from power_forecast.config import ARTIFACTS_DIR, METRICS_CSV, SPEC_PATH
+from power_forecast.forecast import forecast_from_params, to_local, smape,s_naive
+from power_forecast.smard_data import load_smard_api
 from sklearn.metrics import mean_absolute_error
 
 ARTIFACTS_DIR = Path(ARTIFACTS_DIR)

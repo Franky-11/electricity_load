@@ -35,10 +35,15 @@
 ## 🗂️ Projektstruktur
 
 ```
-app.py         # UI: Sidebar (EDA, Backtesting), Forecast‑Tab, Szenario‑Panel, KPIs
-forecast.py    # Baselines, Walk‑Forward, Metriken, (optionales) SARIMA
-scenarios.py   # What‑if‑Helperfunktionen (Holiday/Weekend, Shift, Temp, Effizienz, Event, PV/Wind)
-smard_data.py  # Daten‑Loader für SMARD
+app.py                    # Streamlit-Einstiegspunkt
+metrics_job.py            # Daily Forecast/Scoring Job
+src/power_forecast/       # kompakter App-Kern
+  forecast.py             # Baselines, Walk-Forward, Metriken, SARIMA
+  smard_data.py           # Daten-Loader fuer SMARD
+  data_quality.py         # Datenqualitaets-Kennzahlen
+  scenarios.py            # What-if-Transformationen
+  ui_components.py        # Streamlit-Komponenten
+tests/                    # Tests fuer Kernlogik und SMARD-Parsing
 
 ```
 ---
@@ -101,7 +106,6 @@ Datensatz:
 - **Quelle:** SMARD – Strommarktdaten der Bundesnetzagentur, Bereich *Stromverbrauch: Gesamt (Netzlast)*, Region **DE**, Auflösung **Stunde**.  
 - **Lizenz:** **Creative Commons CC BY 4.0** 
 - **Empfohlene Attribution:** **„Bundesnetzagentur | SMARD.de“**.  
-
 
 
 

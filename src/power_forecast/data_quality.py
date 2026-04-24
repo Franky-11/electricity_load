@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from config import TIMEZONE
+from .config import TIMEZONE
 
 
 @dataclass(frozen=True)

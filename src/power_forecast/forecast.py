@@ -10,7 +10,7 @@ import holidays
 import json
 import os
 
-from config import (
+from .config import (
     ARTIFACTS_DIR,
     PARAM_PATH,
     REPO_PARAM_FALLBACK,

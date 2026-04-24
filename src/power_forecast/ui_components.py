@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from data_quality import calculate_data_quality
+from .data_quality import calculate_data_quality
 
 
 KPI_STYLE = """

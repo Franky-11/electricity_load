@@ -1,5 +1,11 @@
 import json
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent
+SRC_DIR = ROOT_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 import numpy as np
 import pandas as pd
@@ -9,8 +15,8 @@ import plotly.io as pio
 import streamlit as st
 from holidays import Germany
 
-from config import METRICS_CSV, TIMEZONE
-from forecast import (
+from power_forecast.config import METRICS_CSV, TIMEZONE
+from power_forecast.forecast import (
     backtest_current_model,
     eval_baselines,
     eval_sarimax_rolling90_fast,
@@ -24,9 +30,9 @@ from forecast import (
     save_validation_json,
     to_local,
 )
-from scenarios import efficiency_trend, event_days, mult_holiday_weekend, shift_load, temp_adjust
-from smard_data import load_smard_api
-from ui_components import kpi_card, show_data_quality, show_last_val
+from power_forecast.scenarios import efficiency_trend, event_days, mult_holiday_weekend, shift_load, temp_adjust
+from power_forecast.smard_data import load_smard_api
+from power_forecast.ui_components import kpi_card, show_data_quality, show_last_val
 
 pio.templates.default = "plotly_dark"
 

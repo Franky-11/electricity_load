@@ -6,15 +6,15 @@ import numpy as np
 from typing import Optional
 import json, hashlib
 
+from config import ARTIFACTS_DIR, METRICS_CSV, SPEC_PATH
 from forecast import forecast_from_params, to_local, smape,s_naive
 from smard_data import load_smard_api
 from sklearn.metrics import mean_absolute_error
 
-ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "artifacts"))
+ARTIFACTS_DIR = Path(ARTIFACTS_DIR)
 FORECAST_DIR = ARTIFACTS_DIR / "forecasts"
 FORECAST_DIR.mkdir(parents=True, exist_ok=True)
-METRICS_CSV = ARTIFACTS_DIR / "metrics.csv"
-SPEC_PATH  = os.path.join(ARTIFACTS_DIR, "sarima_spec.json")
+METRICS_CSV = Path(METRICS_CSV)
 
 def _save_forecast_csv(yhat_loc: pd.Series,
                        pi_loc: Optional[pd.DataFrame],

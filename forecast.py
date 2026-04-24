@@ -7,20 +7,19 @@ from statsmodels.tsa.statespace.kalman_filter import MEMORY_NO_SMOOTHING
 import gc
 
 import holidays
-import streamlit as st
 import json
 import os
 
-ARTIFACTS_DIR = os.environ.get("ARTIFACTS_DIR", "artifacts")  # per Docker-Volume persistiert
+from config import (
+    ARTIFACTS_DIR,
+    PARAM_PATH,
+    REPO_PARAM_FALLBACK,
+    REPO_SPEC_FALLBACK,
+    SPEC_PATH,
+    VAL_PATH,
+)
+
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
-
-PARAM_PATH = os.path.join(ARTIFACTS_DIR, "sarima_params.npz")
-SPEC_PATH  = os.path.join(ARTIFACTS_DIR, "sarima_spec.json")
-VAL_PATH   = os.path.join(ARTIFACTS_DIR, "val_sarima_latest.json")
-
-# Fallbacks: wenn Artefakt im Volume fehlt, aus Repo lesen (initiale Dateien)
-REPO_PARAM_FALLBACK = "sarima_params.npz"
-REPO_SPEC_FALLBACK  = "sarima_spec.json"
 
 def resolve_params_spec():
     p = PARAM_PATH if os.path.exists(PARAM_PATH) else REPO_PARAM_FALLBACK
@@ -240,91 +239,6 @@ def load_validation_json(path=VAL_PATH):
 def load_sarima_pred():
     df=pd.read_csv("sarima.csv",parse_dates=["timestamp"])
     return df.set_index("timestamp")
-
-
-def format_thinspace(x: float) -> str:
-    # 12 345 statt 12,345
-    return f"{x:,.2f}".replace(",", " ")
-
-
-def kpi_card(title: str, value: float, unit: str = "", icon: str = "⚡", footnote: str | None = None):
-    cls = "pos" if value > 0 else "neg" if value < 0 else "neu"
-    sign_icon = "🔺" if value > 0 else "🔻" if value < 0 else "⏸️"
-    icon = icon or sign_icon  # optional eigenes Icon überschreibt das
-    val = format_thinspace(value)
-    st.markdown(f"""
-    <div class="kpi {cls}">
-      <div class="kpi-head"><span class="kpi-ic">{icon}</span>{title}</div>
-      <div class="kpi-val">{val}<span class="kpi-unit"> {unit}</span></div>
-      {f'<div class="kpi-foot">{footnote}</div>' if footnote else ''}
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def kpi_card_2(title: str, value, unit: str = "", icon: str = "⚡", footnote: str | None = None):
-    st.markdown(f"""
-     <div class="kpi">
-      <div class="kpi-head"><span class="kpi-ic">{icon}</span>{title}</div>
-      <div class="kpi-val">{value}<span class="kpi-unit"> {unit}</span></div>
-      {f'<div class="kpi-foot">{footnote}</div>' if footnote else ''}
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def show_last_val(df,gain):
-    st.markdown("""
-            <style>
-            :root{
-              --bg:#0b132b; --card:#0f1c2e; --border:#133046;
-              --text:#d8f3ff; --muted:#7dd3fc; --foot:#9cc3d5;
-              --pos:#22c55e; --neg:#ef4444;
-            }
-            .kpi{
-              background: linear-gradient(180deg, var(--card), var(--bg));
-              border: 1px solid var(--border);
-              border-radius: 16px;
-              padding: 16px 18px;
-              box-shadow: 0 10px 30px rgba(0,0,0,.25);
-            }
-            .kpi-head{
-              font-size: 14px; color: var(--muted);
-              display:flex; align-items:center; gap:8px; letter-spacing:.3px;
-            }
-            .kpi-ic{ font-size:16px; }
-            .kpi-val{
-              margin-top:6px; line-height:1.1;
-              font-size: 32px; font-weight: 700; color: var(--text);
-            }
-            .kpi-unit{ font-size:16px; color: var(--muted); margin-left:6px; }
-            .kpi-foot{ font-size:12px; color: var(--foot); margin-top:6px; }
-            .kpi.pos .kpi-val{ text-shadow:0 0 12px rgba(34,197,94,.35); }
-            .kpi.neg .kpi-val{ text-shadow:0 0 12px rgba(239,68,68,.35); }
-            .kpi.neu .kpi-val{ text-shadow:0 0 10px rgba(125,211,252,.25); }
-            </style>
-            """, unsafe_allow_html=True)
-
-
-    mae = float(df.get("MAE", np.nan))
-    smape = float(df.get("sMAPE", np.nan))
-
-    gate = 5.0
-    ok = (gain is not None) and (gain >= gate)
-    if gain is not None:
-        txt = f"{gain:.1f}% besser als s-Naive(168) – {'OK ✅' if ok else 'unter Gate ❗'}"
-
-    c1, c2, c3= st.columns(3)
-
-    with c1:
-        kpi_card("MAE (MWh)", mae, "MWh", icon="📉")
-
-    with c2:
-        kpi_card("sMAPE", smape, "%", icon="")
-
-    with c3:
-        kpi_card("Vorteil ggü. s-Naive",
-                 0.0 if (gain is None) else gain, "%",
-                 icon=("✅" if ok else "⚠️"),
-                 footnote=f"Gate: ≥ {gate:.0f}% · {txt}")
 
 
 """

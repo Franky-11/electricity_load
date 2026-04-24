@@ -101,28 +101,53 @@ def read_sidebar_filters(df: pd.DataFrame) -> tuple[bool, bool, pd.Timestamp.dat
     return show_holidays, compare_prev, start_date, end_date, df_view, df_prev, prev_info
 
 
-def render_home() -> None:
-    left, _, right = st.columns([1.25, 0.2, 1])
-    st.write("")
+def render_home(s: pd.Series) -> None:
+    left, _, right = st.columns([1.15, 0.12, 1])
+    last_ts = s.index.max().tz_convert(TIMEZONE)
+    first_ts = s.index.min().tz_convert(TIMEZONE)
+    latest_load = float(s.loc[s.index.max()])
+    artifact_count = len(list(Path("artifacts/forecasts").glob("*.csv"))) if Path("artifacts/forecasts").exists() else 0
+
     with left:
-        abruf = pd.Timestamp.now().strftime("%Y-%m-%d")
-        st.subheader("Willkommen! 👋")
+        st.subheader("Stromlast-Forecast Deutschland")
         st.markdown(
-            f"""
-            **Diese App** zeigt Trend, Wochenmuster und saisonale Mittelwerte für den deutschen Stromverbrauch
-
-            **Features**
-            - Zeitraum in der Sidebar wählen (inkl. Vorjahresvergleich).
-            - Trend mit **Rolling 24h/7d** und **Feiertagsmarkierung** ansehen.
-            - **Wochenprofil** und **Wochentage/Monate** vergleichen.
-            - **Backtesting & Forecasting** 24h Vorhersage der Lastdaten & Vergleich verschiedener Modelle
-
-            **Datensatz:**
-            Daten: Bundesnetzagentur | SMARD.de – Bereich „Stromverbrauch: Gesamt (Netzlast)“, Region DE, Abruf: {abruf}, Lizenz: CC BY 4.0.
+            """
+            Operativer 24h-Forecast für die deutsche Netzlast mit Datenstatus,
+            Modellvergleich, täglichem Scoring und Monitoring der letzten Forecast-Läufe.
             """
         )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            kpi_card_value("Letzter Datenpunkt", last_ts.strftime("%Y-%m-%d %H:%M"), icon="🕑")
+        with c2:
+            kpi_card("Aktuelle Netzlast", latest_load, "MW", icon="⚡")
+
+        c3, c4 = st.columns(2)
+        with c3:
+            kpi_card_value("Historie", f"{first_ts.date()} bis {last_ts.date()}", icon="📈")
+        with c4:
+            kpi_card_value("Forecast-Artefakte", artifact_count, icon="📦")
+
     with right:
         st.image("images/app_picture.png")
+
+    st.divider()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("**Forecast**")
+        st.write("Datenstatus prüfen, 24h-Prognose erzeugen und Modelle gegen `seasonal_naive_168h` validieren.")
+    with col2:
+        st.markdown("**Ops**")
+        st.write("Historische MAE-, sMAPE-, Gain- und Coverage-Metriken aus den persistierten Artefakten verfolgen.")
+    with col3:
+        st.markdown("**EDA & Simulation**")
+        st.write("Lastmuster analysieren und optionale What-if-Simulationen klar getrennt vom Forecast betrachten.")
+
+    abruf = pd.Timestamp.now(tz=TIMEZONE).strftime("%Y-%m-%d")
+    st.caption(
+        f"Daten: Bundesnetzagentur | SMARD.de, Stromverbrauch Gesamt (Netzlast), Region DE. Abruf: {abruf}. Lizenz: CC BY 4.0."
+    )
 
 
 def render_eda(
@@ -593,7 +618,7 @@ def main() -> None:
     st.title("Stromverbrauch Deutschland")
 
     if page == "Home":
-        render_home()
+        render_home(s)
     elif page == "EDA":
         show_holidays, compare_prev, start_date, end_date, df_view, df_prev, prev_info = read_sidebar_filters(df)
         render_eda(df_view, df_prev, start_date, end_date, prev_info, show_holidays, compare_prev)

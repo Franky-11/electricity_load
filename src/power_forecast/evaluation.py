@@ -57,7 +57,9 @@ def mase(y_true: pd.Series, y_pred: pd.Series, insample: pd.Series, m: int = 1) 
         scale = insample.diff().abs().dropna().mean()
     else:
         scale = (insample - insample.shift(m)).abs().dropna().mean()
-    return float((np.abs(y_true - y_pred).mean()) / (float(scale) + 1e-12))
+    if pd.isna(scale) or abs(float(scale)) < 1e-12:
+        return np.nan
+    return float(np.abs(y_true - y_pred).mean() / float(scale))
 
 
 def mae(y_true: pd.Series, y_pred: pd.Series) -> float:
@@ -69,12 +71,17 @@ def score_forecast(
     y_pred: pd.Series,
     baseline: pd.Series | None = None,
     insample: pd.Series | None = None,
+    interval: pd.DataFrame | None = None,
+    nominal_coverage: float = 0.95,
     mase_m: int = 168,
     min_coverage: float = 0.8,
 ) -> dict:
     aligned = pd.concat({"y_true": y_true, "y_pred": y_pred}, axis=1)
     if baseline is not None:
         aligned["baseline"] = baseline
+    if interval is not None and {"lo", "hi"}.issubset(interval.columns):
+        aligned["lo"] = interval["lo"]
+        aligned["hi"] = interval["hi"]
     aligned = aligned.dropna(subset=["y_true", "y_pred"])
 
     expected = len(y_pred)
@@ -92,6 +99,9 @@ def score_forecast(
         "MASE_168h": np.nan,
         "MAE_base": np.nan,
         "Gain": np.nan,
+        "PI_coverage_pct": np.nan,
+        "PI_mean_width_MW": np.nan,
+        "PI_calibration_error_pct": np.nan,
     }
     if not valid:
         return row
@@ -107,6 +117,15 @@ def score_forecast(
         base = aligned["baseline"].astype(float)
         row["MAE_base"] = mae(yt, base)
         row["Gain"] = (row["MAE_base"] - row["MAE"]) / (row["MAE_base"] + 1e-12) * 100
+
+    if interval is not None and {"lo", "hi"}.issubset(aligned.columns):
+        pi = aligned.dropna(subset=["lo", "hi"])
+        if len(pi):
+            inside = (pi["y_true"] >= pi["lo"]) & (pi["y_true"] <= pi["hi"])
+            coverage_pct = float(inside.mean() * 100)
+            row["PI_coverage_pct"] = coverage_pct
+            row["PI_mean_width_MW"] = float((pi["hi"] - pi["lo"]).mean())
+            row["PI_calibration_error_pct"] = coverage_pct - nominal_coverage * 100
 
     return row
 

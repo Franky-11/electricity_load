@@ -41,9 +41,13 @@ def _save_forecast_csv(yhat_loc: pd.Series,
     try:
         spec = json.load(open(spec_path, "r", encoding="utf-8"))
         meta = {
+            "model_name": spec.get("model_name", "sarima_exog"),
+            "model_version": spec.get("model_version", "sarima_exog_v1"),
             "order": tuple(spec.get("order", [])),
             "seasonal_order": tuple(spec.get("seasonal_order", [])),
             "k_exog": spec.get("k_exog"),
+            "feature_list": spec.get("feature_list", []),
+            "target": spec.get("target", "load_mw"),
             "train_window_days": spec.get("win_days"),
             "last_refit": spec.get("last_refit"),
         }
@@ -122,7 +126,7 @@ def _append_metrics_row(row: dict):
 
 
 META_COLS_FLAT = [
-    "k_exog", "train_window_days", "last_refit", "spec_sha256"
+    "model_name", "model_version", "target", "feature_list", "k_exog", "train_window_days", "last_refit", "spec_sha256"
 ]
 
 def _parse_issue_from_artifact_name(fpath: Path) -> Optional[pd.Timestamp]:
@@ -265,6 +269,8 @@ def evaluate_yesterday_and_save_today():
             y_true,
             fc.get("yhat"),
             baseline=fc.get("yhat_snaive") if "yhat_snaive" in fc.columns else None,
+            interval=fc[["lo", "hi"]] if {"lo", "hi"}.issubset(fc.columns) else None,
+            nominal_coverage=0.95,
             min_coverage=0.8,
         )
         cov = int(score["points_compared"])
@@ -279,6 +285,9 @@ def evaluate_yesterday_and_save_today():
             "MAE_base": round(float(score["MAE_base"]), 3) if score["valid"] else np.nan,
             "Gain": round(float(score["Gain"]), 1) if score["valid"] else np.nan,
             "coverage_pct": round(float(score["coverage_pct"]), 1),
+            "PI_coverage_pct": round(float(score["PI_coverage_pct"]), 1) if score["valid"] else np.nan,
+            "PI_mean_width_MW": round(float(score["PI_mean_width_MW"]), 3) if score["valid"] else np.nan,
+            "PI_calibration_error_pct": round(float(score["PI_calibration_error_pct"]), 1) if score["valid"] else np.nan,
         }
 
         row.update(_extract_meta_from_forecast(fc, fpath))

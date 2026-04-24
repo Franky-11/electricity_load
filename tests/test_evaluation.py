@@ -43,6 +43,19 @@ def test_score_forecast_marks_low_coverage_invalid():
     assert np.isnan(row["MAE"])
 
 
+def test_score_forecast_evaluates_prediction_interval():
+    idx = pd.date_range("2026-01-01 00:00", periods=4, freq="h")
+    y_true = pd.Series([10.0, 20.0, 30.0, 40.0], index=idx)
+    y_pred = pd.Series([10.0, 20.0, 30.0, 40.0], index=idx)
+    interval = pd.DataFrame({"lo": [5.0, 15.0, 35.0, 35.0], "hi": [15.0, 25.0, 45.0, 45.0]}, index=idx)
+
+    row = score_forecast(y_true, y_pred, interval=interval, nominal_coverage=0.75)
+
+    assert row["PI_coverage_pct"] == 75.0
+    assert row["PI_mean_width_MW"] == 10.0
+    assert row["PI_calibration_error_pct"] == 0.0
+
+
 def test_summarize_scores_averages_only_valid_rows():
     summary = summarize_scores([
         {"valid": True, "MAE": 10.0, "sMAPE": 1.0, "MAE_base": 20.0, "points_compared": 24, "expected_points": 24, "coverage_pct": 100.0, "Gain": 50.0},

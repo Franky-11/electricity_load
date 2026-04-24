@@ -25,6 +25,14 @@ from .evaluation import (
     summarize_scores,
     walk_forward_folds,
 )
+from .feature_model import (
+    MODEL_NAME as FEATURE_MODEL_NAME,
+    MODEL_VERSION as FEATURE_MODEL_VERSION,
+    eval_feature_model,
+    eval_feature_model_windows,
+    refit_predict_feature_model,
+)
+from .features import FEATURE_COLUMNS
 
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
@@ -75,9 +83,9 @@ def eval_baselines(s, H=24, m=24, win_days=90, eval_days=30):
     for fold in walk_forward_folds(s, H=H, win_days=win_days, eval_days=eval_days, step_hours=H):
         tr = fold.train
         te = fold.test
-        for name, yhat in [("naive_letzte Stunde", naive(tr, len(te))),
-                           ("snaive_letzten 24 Stunden", s_naive(tr, len(te), m)),
-                           ("snaive_letzten 168 Stunden", s_naive(tr, len(te), 168)),
+        for name, yhat in [("naive_last_hour", naive(tr, len(te))),
+                           ("seasonal_naive_24h", s_naive(tr, len(te), m)),
+                           ("seasonal_naive_168h", s_naive(tr, len(te), 168)),
                            ("drift", drift(tr, len(te)))]:
             row = score_forecast(te, yhat, insample=tr, mase_m=168)
             rows.append({"model": name,
@@ -174,10 +182,16 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
 
             fc_obj = res.get_forecast(steps=len(te), exog=Xte)
             fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
+            pi = fc_obj.conf_int(alpha=0.05)
+            pi.columns = ["lo", "hi"]
+            pi.index = te.index
             base = s_naive(tr, len(fc), m=m)
 
-            row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=168)
+            row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=168, interval=pi, nominal_coverage=0.95)
             row["cutoff"] = fold.cutoff
+            row["model"] = "sarima_exog"
+            row["model_version"] = "sarima_exog_v1"
+            row["error"] = ""
             rows.append(row)
 
             # 5) Speicher freigeben
@@ -185,9 +199,25 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
             if len(rows) % 2 == 0:
                 gc.collect()
 
-        except Exception:
-            # optional: logging
-            pass
+        except Exception as exc:
+            rows.append({
+                "cutoff": fold.cutoff,
+                "model": "sarima_exog",
+                "model_version": "sarima_exog_v1",
+                "valid": False,
+                "points_compared": 0,
+                "expected_points": len(te),
+                "coverage_pct": 0.0,
+                "MAE": np.nan,
+                "sMAPE": np.nan,
+                "MASE_168h": np.nan,
+                "MAE_base": np.nan,
+                "Gain": np.nan,
+                "PI_coverage_pct": np.nan,
+                "PI_mean_width_MW": np.nan,
+                "PI_calibration_error_pct": np.nan,
+                "error": str(exc),
+            })
 
     summary = summarize_scores(rows)
     if not summary.empty:
@@ -321,16 +351,24 @@ def forecast_from_params(s, H=24,win_days=90, params_path=PARAM_PATH, spec_path=
 
 
 def to_local(yhat: pd.Series, pi: pd.DataFrame):
-    yhat_loc = yhat.tz_localize("UTC").tz_convert("Europe/Berlin")
+    yhat_loc = yhat.copy()
+    if yhat_loc.index.tz is None:
+        yhat_loc.index = yhat_loc.index.tz_localize("UTC").tz_convert("Europe/Berlin")
+    else:
+        yhat_loc.index = yhat_loc.index.tz_convert("Europe/Berlin")
     pi_loc = pi.copy(); pi_loc.index = yhat_loc.index
     return yhat_loc, pi_loc
 
 
 def save_model_light(res,win_days, params_path=PARAM_PATH, spec_path=SPEC_PATH):
     spec = {
+        "model_name":    "sarima_exog",
+        "model_version": "sarima_exog_v1",
         "order":         list(res.model.order),
         "seasonal_order":list(res.model.seasonal_order),
         "k_exog":        int(getattr(res.model, "k_exog", 0)),
+        "feature_list":  ["is_weekend", "is_hol"],
+        "target":        "load_mw",
         "last_refit":    pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
         "win_days":      win_days
     }
@@ -371,10 +409,13 @@ def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
         # --- Forecast ---
         fc_obj = res.get_forecast(H, exog=Xte)
         fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
+        pi = fc_obj.conf_int(alpha=0.05)
+        pi.columns = ["lo", "hi"]
+        pi.index = te.index
         base = s_naive(tr, len(fc), m=m)
 
         # --- robustes Scoring ---
-        row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=m)
+        row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=m, interval=pi, nominal_coverage=0.95)
         row["cutoff"] = fold.cutoff
         rows.append(row)
 
@@ -400,9 +441,13 @@ def model_card_meta(kpis: dict | None = None, gain: float | None = None,
     try:
         spec = json.load(open(spec_path, "r", encoding="utf-8"))
         meta.update({
+            "model_name": spec.get("model_name", "sarima_exog"),
+            "model_version": spec.get("model_version", "sarima_exog_v1"),
             "order": tuple(spec.get("order", [])),
             "seasonal_order": tuple(spec.get("seasonal_order", [])),
             "k_exog": spec.get("k_exog"),
+            "feature_list": spec.get("feature_list", ["is_weekend", "is_hol"]),
+            "target": spec.get("target", "load_mw"),
             "train_window_days": spec.get("win_days"),
             "last_refit": spec.get("last_refit")
         })
@@ -414,7 +459,9 @@ def model_card_meta(kpis: dict | None = None, gain: float | None = None,
         if kpis is None and isinstance(df, pd.DataFrame) and not df.empty:
             row = df.iloc[0]
             kpis = {"MAE": float(row.get("MAE", np.nan)),
-                    "sMAPE": float(row.get("sMAPE", np.nan))}
+                    "sMAPE": float(row.get("sMAPE", np.nan)),
+                    "PI_coverage_pct": float(row.get("PI_coverage_pct", np.nan)),
+                    "PI_mean_width_MW": float(row.get("PI_mean_width_MW", np.nan))}
         if gain is None:
             gain = g
         meta["validated_at"] = vmeta.get("validated_at")
@@ -452,17 +499,27 @@ def model_card_markdown(meta: dict) -> str:
     lines = [
         "# Model Card – SARIMA",
         "## Spec",
+        f"- model_name: `{meta.get('model_name', '—')}`",
+        f"- model_version: `{meta.get('model_version', '—')}`",
+        f"- target: `{meta.get('target', '—')}`",
         f"- order: `{meta.get('order', '—')}`",
         f"- seasonal_order: `{meta.get('seasonal_order', '—')}`",
         f"- k_exog: {fmt(meta.get('k_exog'))}",
+        f"- features: `{', '.join(meta.get('feature_list', []) or [])}`",
         f"- train_window_days: {fmt(meta.get('train_window_days'))}",
         f"- last_refit: {fmt(meta.get('last_refit'))}",
+        "## Candidate Model",
+        f"- model_name: `{FEATURE_MODEL_NAME}`",
+        f"- model_version: `{FEATURE_MODEL_VERSION}`",
+        f"- features: `{', '.join(FEATURE_COLUMNS)}`",
         "## Validation (letzte)",
         f"- validated_at: {fmt(meta.get('validated_at'))}",
         f"- horizon H: {fmt(meta.get('H'))}",
         f"- eval_days: {fmt(meta.get('eval_days'))}",
         f"- MAE: {fmt(k.get('MAE'))}",
         f"- sMAPE: {fmt(k.get('sMAPE'))}",
+        f"- PI coverage: {fmt(k.get('PI_coverage_pct'))}",
+        f"- PI mean width MW: {fmt(k.get('PI_mean_width_MW'))}",
         f"- Vorteil ggü. s-Naive(168): {gtxt}",
         "## Environment",
         f"- python: {meta['env'].get('python', '—')}",

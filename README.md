@@ -1,111 +1,108 @@
-# Stromlast‑Forecast DE
-> Dieses Projekt prognostiziert die stündliche Stromlast 
-(Kurzfrist-Horizon: 24 h). Ziel ist, Day-Ahead/Intraday-Mengen verlässlicher zu planen und Transparenz über Prognoseunsicherheit zu schaffen. Die Lösung kombiniert einfache Baselines (seasonal-naive) mit einem SARIMA-Modell, 
- bewertet täglich per MAE/sMAPE und Promotion-Gate (Vorteil ggü. Baseline), 
- speichert Artefakte reproduzierbar und überwacht die 
- Modellgüte im Ops-Tab.
+# Stromlast-Forecast DE
 
-## ✨ Features
+Streamlit-App fuer einen operativen 24h-Forecast der deutschen Netzlast. Die App verbindet SMARD-Datenabruf, Datenqualitaetspruefung, Modellvergleich, Forecast-Ausgabe und Monitoring in einer schlanken Oberflaeche.
 
-- **EDA**: Zeitraumwahl, Feiertags‑Overlay, optional Vorjahresvergleich; Linien‑ & Wochenmusterplots.
-- **Baselines & Backtesting**: Naive / Seasonal‑Naive (m=24/168) / Drift; Walk‑Forward mit fixem Horizont.
-- **Metriken**: **MAE**, **sMAPE**, **MASE (168h)**.
-- **SARIMA (+exogene Kalender‑Features)**: optional.
-- **Daily-Metrics-Job**: Forecasting und Scoring via Github-Actions, Monitoring Modell-Metriken 
-- **What‑if Szenarien** (Post‑Processing):
-  - Feiertag/Weekend‑Multiplikator,
-  - Peak→Off‑Peak‑Verschiebung (Demand Response),
-  - Temperatur‑Sensitivity (linear),
-  - Effizienz‑/Spar‑Trend (ab Datum),
-  - Event‑Tage (±%),
-- **KPI‑Cards**: Δ Peak (MW), Δ Energie (MWh) für Szenarien.
+Der fachliche Fokus liegt auf nachvollziehbarer Kurzfristprognose: Baselines bleiben die Referenz, SARIMA und ein feature-basiertes Modell treten gegen `seasonal_naive_168h` an, und Forecast-Artefakte werden taeglich bewertet.
 
----
+## Features
 
-## 🖼️ Einblicke
+- **Forecast-Ansicht**: Datenstatus, 24h-Forecast, Modellstatus und Validierung in einem operativen Workflow.
+- **Modellvergleich**: `naive_last_hour`, `seasonal_naive_24h`, `seasonal_naive_168h`, SARIMA+Kalenderfeatures und Random-Forest mit Lag-/Kalenderfeatures.
+- **Backtesting**: Rolling-Origin-Folds mit `H=24`, 24h-Schritt und Coverage-Pruefung.
+- **Metriken**: `MAE`, `sMAPE`, `MASE_168h`, Baseline-Gain gegen `seasonal_naive_168h`.
+- **Prediction Intervals**: Coverage, mittlere Intervallbreite und Kalibrierungsfehler im gemeinsamen Scoring.
+- **Ops / Monitoring**: historische Forecast-Laeufe, 7-Tage-KPIs, Gain/sMAPE-Verlauf, Intervallmetriken und Forecast-Artefakte.
+- **EDA**: Zeitraumfilter, Feiertags-Overlay, Vorjahresvergleich, Wochenprofil, Wochentage und Monatsmuster.
+- **Szenario-Simulation**: optionale What-if-Presets auf Historie, klar getrennt vom Forecast.
 
-![Forecast-Ansicht – 24h Prognose](images/readme/EDA.png)
+## Screenshots
 
-![Qualitätscheck – Backtest-KPIs](images/readme/Forecast_2.png)
+![Welcome-Seite](images/readme/Home.png)
 
-![Ops-Tab](images/readme/Ops_tab.png)
+![Forecast-Ansicht](images/readme/Forecast.png)
 
+![Ops-Monitoring](images/readme/Ops.png)
 
----
-## 🗂️ Projektstruktur
+## Projektstruktur
 
-```
+```text
 app.py                    # Streamlit-Einstiegspunkt
 metrics_job.py            # Daily Forecast/Scoring Job
-src/power_forecast/       # kompakter App-Kern
-  forecast.py             # Baselines, Walk-Forward, Metriken, SARIMA
-  smard_data.py           # Daten-Loader fuer SMARD
+src/power_forecast/
+  charts.py               # Plotly-Charts fuer EDA
+  config.py               # Pfade und zentrale Settings
   data_quality.py         # Datenqualitaets-Kennzahlen
+  evaluation.py           # Metriken, Folds und gemeinsames Scoring
+  feature_model.py        # Random-Forest-Kandidat mit Lag-/Kalenderfeatures
+  features.py             # Kalender-, Lag- und Rolling-Feature-Pipeline
+  forecast.py             # Baselines, SARIMA, Model Card, Forecast-Wrapper
   scenarios.py            # What-if-Transformationen
+  smard_data.py           # SMARD-Datenzugriff
   ui_components.py        # Streamlit-Komponenten
-tests/                    # Tests fuer Kernlogik und SMARD-Parsing
-
+tests/                    # Tests fuer Kernlogik, Scoring, Features, Szenarien
+artifacts/                # Persistierte Forecast-, Modell- und Metrikartefakte
 ```
----
-## ▶️ Anwendung
 
-**Voraussetzungen**
+## Schnellstart
 
-- Docker Desktop (Windows/macOS) oder Docker Engine (Linux)
-- Port 8501 ist frei
-
-**Repo holen**
-
-- git clone https://github.com/Franky-11/electricity_load.git
-- cd electricity_load
-
-**Schnellstart mit Docker Compose** 
-
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/python -m streamlit run app.py
 ```
+
+Dann oeffnen:
+
+```text
+http://localhost:8501
+```
+
+Alternativ mit Docker Compose:
+
+```bash
 docker compose up --build
 ```
-- Öffne: http://localhost:8501
-- Persistenz: Modelle/Validierungen werden im Host-Ordner ./artifacts gespeichert (und beim Neustart wieder genutzt).
 
----
+## Tests
 
-## 🧠 Modelle & Metriken
+```bash
+.venv/bin/python -m pytest
+```
 
-**Baselines:**
-- `naive` → $\hat{y}_{t+h} = y_t$
-- `seasonal_naive(m)`→ $\hat{y}_{t+h} = y_{t+h-m}$
-- **SARIMA** (optional):  order (1,0,0) x seasonal_order (0,1,0,168) ; exog: Wochenende/Feiertag.
-- **Metriken:**
-  - **MAE** 
-  - **sMAPE** 
-  - **MASE‑168h** 
+Die Tests laufen ohne Netzwerkzugriff. SMARD-spezifische Tests verwenden Mocks.
 
+## Modelle und Validierung
 
+Die App nutzt eine gemeinsame Backtesting- und Scoring-Logik fuer Baselines, SARIMA, Feature-Modell und Daily-Metrics-Job.
 
----
+- Forecast-Horizont: `24h`
+- Fold-Schritt: `24h`
+- Trainingsfenster: konfigurierbar
+- Mindest-Coverage pro Fold: `80%`
+- Primaere Referenz: `seasonal_naive_168h`
 
-## 🧪 What‑if‑Szenarien (Post‑Processing)
+Das feature-basierte Modell nutzt:
 
-Szenarien ändern **Historie** nachträglich:
+- Kalenderfeatures: Stunde, Wochentag, Monat, Wochenende, Feiertag
+- Lag-Features: `t-24`, `t-48`, `t-168`
+- Rolling Means: `24h`, `168h`
 
-- **Holiday/Weekend‑Multiplikator**: skaliert nur diese Tage.
-- **Load‑Shift**: verschiebt x% von Peak‑ in Off‑Peak‑Stunden (Energieerhaltung pro Tag).
-- **Temperatur‑Sensitivity**: ±% je °C Abweichung (linear, synthetisch).
-- **Effizienz‑Trend**: ab Datum pro Jahr ±r% (multiplikativ).
-- **Event‑Tage**: Liste von Datumswerten ±%.
+## Szenarien
 
+Die Szenarien sind Simulationen auf historischen Lastdaten, keine Forecasts. Sie dienen zur schnellen What-if-Analyse:
 
-> **Interpretation:** Δ‑KPIs zeigen **Peak‑Reduktion** (MW) & **Energie‑Δ** (MWh). Ergebnisse sind **Simulationen**, keine Prognosen.
+- Feiertag / Wochenende
+- Demand Response
+- Effizienztrend
+- Wetterstress
+- Netto-Last mit synthetischem PV-/Wind-Abzug
+- Event-Tage
 
----
+Fuer produktive Forecast-Verbesserungen ist ein Forecast-Erklaerungs- und Anomaliepanel der naechste sinnvollere Ausbau als weitere Szenario-Logik.
 
-## 📜 Lizenz
-Code: MIT – siehe LICENSE.
+## Daten und Lizenz
 
-Datensatz:
-- **Quelle:** SMARD – Strommarktdaten der Bundesnetzagentur, Bereich *Stromverbrauch: Gesamt (Netzlast)*, Region **DE**, Auflösung **Stunde**.  
-- **Lizenz:** **Creative Commons CC BY 4.0** 
-- **Empfohlene Attribution:** **„Bundesnetzagentur | SMARD.de“**.  
-
-
-
+- Quelle: Bundesnetzagentur | SMARD.de
+- Bereich: Stromverbrauch Gesamt (Netzlast), Region DE, stuendliche Aufloesung
+- Datenlizenz: Creative Commons CC BY 4.0
+- Code: MIT, siehe [LICENSE](LICENSE)

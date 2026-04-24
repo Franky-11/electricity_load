@@ -13,9 +13,9 @@ from typing import Optional
 import json, hashlib
 
 from power_forecast.config import ARTIFACTS_DIR, METRICS_CSV, SPEC_PATH
-from power_forecast.forecast import forecast_from_params, to_local, smape,s_naive
+from power_forecast.evaluation import score_forecast
+from power_forecast.forecast import forecast_from_params, to_local, s_naive
 from power_forecast.smard_data import load_smard_api
-from sklearn.metrics import mean_absolute_error
 
 ARTIFACTS_DIR = Path(ARTIFACTS_DIR)
 FORECAST_DIR = ARTIFACTS_DIR / "forecasts"
@@ -261,35 +261,24 @@ def evaluate_yesterday_and_save_today():
         s = load_smard_api(years=1)
         y_true = s.reindex(fc.index)
 
-        # Inner Join / Intersection (keine NaNs)
-        cols = {"y_true": y_true, "yhat": fc.get("yhat")}
-        if "yhat_snaive" in fc.columns:
-            cols["yhat_snaive"] = fc["yhat_snaive"]
-
-        aligned = pd.concat(cols, axis=1).dropna()
-        cov = len(aligned)
-
-        if cov > 0:
-            mae = mean_absolute_error(aligned.y_true, aligned.yhat)
-            sm = smape(aligned.y_true, aligned.yhat)
-            if "yhat_snaive" in aligned:
-                mae_base = mean_absolute_error(aligned.y_true, aligned.yhat_snaive)
-                gain = (mae_base - mae) / (mae_base + 1e-12) * 100
-            else:
-                mae_base = np.nan
-                gain = np.nan
-        else:
-            mae = sm = mae_base = gain = np.nan
+        score = score_forecast(
+            y_true,
+            fc.get("yhat"),
+            baseline=fc.get("yhat_snaive") if "yhat_snaive" in fc.columns else None,
+            min_coverage=0.8,
+        )
+        cov = int(score["points_compared"])
 
         row = {
             "scored_at": now_loc.strftime("%Y-%m-%d %H:%M"),
             "forecast_file": fpath.name,
             "forecast_issue": fpath.stem.replace("_", " "),
             "points_compared": cov,
-            "MAE": round(float(mae), 3) if cov else np.nan,
-            "sMAPE": round(float(sm), 3) if cov else np.nan,
-            "MAE_base": round(float(mae_base), 3) if cov else np.nan,
-            "Gain": round(float(gain), 1) if cov else np.nan,
+            "MAE": round(float(score["MAE"]), 3) if score["valid"] else np.nan,
+            "sMAPE": round(float(score["sMAPE"]), 3) if score["valid"] else np.nan,
+            "MAE_base": round(float(score["MAE_base"]), 3) if score["valid"] else np.nan,
+            "Gain": round(float(score["Gain"]), 1) if score["valid"] else np.nan,
+            "coverage_pct": round(float(score["coverage_pct"]), 1),
         }
 
         row.update(_extract_meta_from_forecast(fc, fpath))

@@ -1,4 +1,3 @@
-from sklearn.metrics import mean_absolute_error
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
@@ -18,6 +17,14 @@ from .config import (
     SPEC_PATH,
     VAL_PATH,
 )
+from .evaluation import (
+    baseline_gain_pct,
+    mase as calc_mase,
+    score_forecast,
+    smape as calc_smape,
+    summarize_scores,
+    walk_forward_folds,
+)
 
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
@@ -28,26 +35,12 @@ def resolve_params_spec():
 
 
 def smape(y, yhat):
-    d = (np.abs(y) + np.abs(yhat)).replace(0, np.finfo(float).eps)
-    return 200 * np.mean(np.abs(y - yhat) / d)
+    return calc_smape(y, yhat)
 
 
 # mase scaled auf (seasonal)_naive basleine
 def mase(y: pd.Series, yhat: pd.Series, insample: pd.Series, m: int = 1) -> float:
-    # 1) Align & cast
-    y, yhat = y.align(yhat, join="inner")
-    y = pd.to_numeric(y, errors="coerce");
-    yhat = pd.to_numeric(yhat, errors="coerce")
-    insample = pd.to_numeric(insample, errors="coerce")
-
-    # 2) Skalenfaktor aus TRAIN
-    if m == 1:
-        scale = insample.diff().abs().dropna().mean()
-    else:
-        scale = (insample - insample.shift(m)).abs().dropna().mean()
-
-    # 3) MASE
-    return (np.abs(y - yhat).mean()) / (float(scale) + 1e-12)
+    return calc_mase(y, yhat, insample, m=m)
 
 
 def naive(tr, h):
@@ -77,23 +70,22 @@ def drift(tr, h):
 
 
 def eval_baselines(s, H=24, m=24, win_days=90, eval_days=30):
-    t = s.index.max() - pd.Timedelta(days=eval_days);
     rows = []
 
-    while t + pd.Timedelta(hours=H) <= s.index.max():
-        tr = s.loc[:t].tail(win_days * 24).ffill()  # nur TRAIN füllen
-        te = s.loc[t + pd.Timedelta(hours=1): t + pd.Timedelta(hours=H)]
+    for fold in walk_forward_folds(s, H=H, win_days=win_days, eval_days=eval_days, step_hours=H):
+        tr = fold.train
+        te = fold.test
         for name, yhat in [("naive_letzte Stunde", naive(tr, len(te))),
                            ("snaive_letzten 24 Stunden", s_naive(tr, len(te), m)),
                            ("snaive_letzten 168 Stunden", s_naive(tr, len(te), 168)),
                            ("drift", drift(tr, len(te)))]:
+            row = score_forecast(te, yhat, insample=tr, mase_m=168)
             rows.append({"model": name,
-                         "MAE (MW)": mean_absolute_error(te, yhat),
-                         "sMAPE (%)": smape(te, yhat),
-                       #  "MASE1": mase(te, yhat, tr, m=1),
-                       #  "MASE24": mase(te, yhat, tr, m=24),
-                         "MASE_168h": mase(te, yhat, tr, m=168)})
-        t += pd.Timedelta(hours=H)
+                         "MAE (MW)": row["MAE"],
+                         "sMAPE (%)": row["sMAPE"],
+                         "MASE_168h": row["MASE_168h"]})
+    if not rows:
+        return pd.DataFrame(columns=["MAE (MW)", "sMAPE (%)", "MASE_168h"])
     return pd.DataFrame(rows).groupby("model").mean().round(3)
 
 
@@ -148,20 +140,19 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
 """
 
 def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval=30, step_hours=24):
-    # 1) Serie UTC-naiv, stündlich, sauber
-    s0 = s.copy()
-    if s0.index.tz is not None:
-        s0 = s0.tz_convert("UTC").tz_localize(None)
-    s0 = (s0.sort_index()[~s0.index.duplicated(keep="first")]).asfreq("h")
-
-    m = 168; rows = []
-    t = s0.index.max() - pd.Timedelta(days=days_to_eval)
-    while t + pd.Timedelta(hours=H) <= s0.index.max():
-        tr = s0.loc[:t].tail(24*window_days).ffill()
-        te = s0.loc[t + pd.Timedelta(hours=1): t + pd.Timedelta(hours=H)]
-        if len(tr) < 2*m or len(te) == 0:
-            t += pd.Timedelta(hours=step_hours); continue
-
+    m = 168
+    rows = []
+    folds = walk_forward_folds(
+        s,
+        H=H,
+        win_days=window_days,
+        eval_days=days_to_eval,
+        step_hours=step_hours,
+        min_train_points=2 * m,
+    )
+    for fold in folds:
+        tr = fold.train
+        te = fold.test
         # 2) Exogene (float + feste Reihenfolge)
         Xtr = _exog_utcnaive_to_local(tr.index).astype("float64")
         Xte = _exog_utcnaive_to_local(te.index).astype("float64")
@@ -185,21 +176,9 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
             fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
             base = s_naive(tr, len(fc), m=m)
 
-            # 4) Robust scorEN (NaN-Maske + Coverage)
-            y_true = te.astype(float)
-            mask = (~y_true.isna()) & (~fc.isna())
-            if mask.sum() < int(0.8*len(fc)):
-                # aufräumen, nächster Fold
-                del fc_obj, res, mod, Xtr, Xte; gc.collect()
-                t += pd.Timedelta(hours=step_hours); continue
-
-            yt, yp = y_true[mask], fc[mask]
-            rows.append({
-                "MAE": mean_absolute_error(yt, yp),
-                "sMAPE": smape(yt, yp),
-                "MAE_base": mean_absolute_error(yt, base[mask]),
-               # "MASE168": mase(yt, yp, tr, m=168),
-            })
+            row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=168)
+            row["cutoff"] = fold.cutoff
+            rows.append(row)
 
             # 5) Speicher freigeben
             del fc_obj, res, mod, Xtr, Xte
@@ -210,15 +189,11 @@ def eval_sarimax_rolling90_fast(s: pd.Series, H=24, window_days=90, days_to_eval
             # optional: logging
             pass
 
-        t += pd.Timedelta(hours=step_hours)
-
-    out = pd.DataFrame(rows)
-    if len(out):
-        summary = out.mean(numeric_only=True).to_frame().T
-        gain=float((out["MAE_base"].mean() - out["MAE"].mean())/out["MAE_base"].mean()*100)
-        return summary.round(3),gain
-    else:
-        return out
+    summary = summarize_scores(rows)
+    if not summary.empty:
+        gain = baseline_gain_pct(float(summary["MAE"].iloc[0]), float(summary["MAE_base"].iloc[0]))
+        return summary.round(3), gain
+    return summary, np.nan
 
 
 
@@ -365,9 +340,6 @@ def save_model_light(res,win_days, params_path=PARAM_PATH, spec_path=SPEC_PATH):
 
 def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
                            session_res=None, spec_path="sarima_spec.json", params_path="sarima_params.npz"):
-    # 1) Serie UTC-naiv & stündlich
-    y = s.asfreq("h");  y = y.tz_convert("UTC").tz_localize(None) if y.index.tz is not None else y
-    y = y.sort_index().asfreq("h"); rows=[]
     # 2) Params + Spec holen (Session-Res bevorzugt)
     if session_res is not None:
         spec = {"order": list(session_res.model.order), "seasonal_order": list(session_res.model.seasonal_order)}
@@ -375,17 +347,15 @@ def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
     else:
         spec = json.load(open(spec_path)); params = np.load(params_path)["params"]
 
-    # 3) Walk-forward
-    t = y.index.max() - pd.Timedelta(days=eval_days)
-    while t + pd.Timedelta(hours=H) <= y.index.max():
-        tr = y.loc[:t].tail(win_days*24).ffill()
-        te_idx = pd.date_range(t + pd.Timedelta(hours=1), periods=H, freq="h")
-        if len(tr) < 2*m:
-            t += pd.Timedelta(hours=H); continue
+    rows = []
+    folds = walk_forward_folds(s, H=H, win_days=win_days, eval_days=eval_days, step_hours=H, min_train_points=2 * m)
+    for fold in folds:
+        tr = fold.train
+        te = fold.test
 
         # --- Exogene float + feste Spaltenreihenfolge (robust) ---
         Xtr = _exog_utcnaive_to_local(tr.index).astype("float64")
-        Xte = _exog_utcnaive_to_local(te_idx).astype("float64")
+        Xte = _exog_utcnaive_to_local(te.index).astype("float64")
         cols = ["is_weekend", "is_hol"]
         if all(c in Xtr.columns for c in cols):
             Xtr = Xtr[cols]; Xte = Xte[cols]
@@ -400,37 +370,24 @@ def backtest_current_model(s, H=24, eval_days=14, win_days=60, m=168,
 
         # --- Forecast ---
         fc_obj = res.get_forecast(H, exog=Xte)
-        fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te_idx)
+        fc = pd.Series(np.asarray(fc_obj.predicted_mean), index=te.index)
         base = s_naive(tr, len(fc), m=m)
 
         # --- robustes Scoring ---
-        y_true = y.reindex(fc.index).astype(float)
-        base = base.reindex(fc.index).astype(float)
-        mask = (~y_true.isna()) & (~fc.isna())
-        cov = int(mask.sum())
-        if cov < int(0.8 * len(fc)):
-            # Aufräumen & nächster Fold
-            del fc_obj, res, mod, Xtr, Xte
-            gc.collect()
-            t += pd.Timedelta(hours=H); continue
-
-        yt, yp = y_true[mask], fc[mask]
-        rows.append({
-            "MAE": mean_absolute_error(yt, yp),
-            "sMAPE": smape(yt, yp),
-            "MAE_base": mean_absolute_error(yt, base[mask]),
-        })
+        row = score_forecast(te, fc, baseline=base, insample=tr, mase_m=m)
+        row["cutoff"] = fold.cutoff
+        rows.append(row)
 
         # Speicher freigeben (wichtig bei Compose/Docker)
         del fc_obj, res, mod, Xtr, Xte
         if len(rows) % 2 == 0:
             gc.collect()
 
-        t += pd.Timedelta(hours=H)
-
-    df = pd.DataFrame(rows)
-    return (df[["MAE","sMAPE"]].mean().round(3),
-            float((df["MAE_base"].mean() - df["MAE"].mean())/df["MAE_base"].mean()*100) if len(df) else np.nan)
+    summary = summarize_scores(rows)
+    if summary.empty:
+        return pd.Series({"MAE": np.nan, "sMAPE": np.nan}), np.nan
+    gain = baseline_gain_pct(float(summary["MAE"].iloc[0]), float(summary["MAE_base"].iloc[0]))
+    return summary.iloc[0][["MAE", "sMAPE"]].round(3), gain
 
 
 

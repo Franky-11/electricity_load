@@ -15,24 +15,27 @@ import plotly.io as pio
 import streamlit as st
 from holidays import Germany
 
+from power_forecast.charts import eda_month_chart, eda_trend_chart, eda_week_profile_chart, eda_weekday_chart
 from power_forecast.config import METRICS_CSV, TIMEZONE
 from power_forecast.forecast import (
     backtest_current_model,
     eval_baselines,
+    eval_feature_model,
     eval_sarimax_rolling90_fast,
     forecast_from_params,
     load_validation_json,
     model_card_markdown,
     model_card_meta,
     refit_predict_pi,
+    refit_predict_feature_model,
     resolve_params_spec,
     s_naive,
     save_validation_json,
     to_local,
 )
-from power_forecast.scenarios import efficiency_trend, event_days, mult_holiday_weekend, shift_load, temp_adjust
+from power_forecast.scenarios import apply_net_load, efficiency_trend, event_days, mult_holiday_weekend, shift_load, temp_adjust
 from power_forecast.smard_data import load_smard_api
-from power_forecast.ui_components import kpi_card, show_data_quality, show_last_val
+from power_forecast.ui_components import kpi_card, kpi_card_value, show_data_quality, show_last_val
 
 pio.templates.default = "plotly_dark"
 
@@ -134,81 +137,66 @@ def render_eda(
     st.subheader("Trend & Wochenmuster (EDA)")
     st.caption(f"TZ: {TIMEZONE} · freq=H · Auswahl: {start_date} bis {end_date}{prev_info}")
 
-    rm24 = df_view["y"].rolling(24, min_periods=1).mean()
-    rm168 = df_view["y"].rolling(168, min_periods=1).mean()
-    fig1 = go.Figure()
-    fig1.add_trace(go.Scatter(x=df_view.index, y=df_view["y"], mode="lines", name="y", line=dict(width=1, color="grey")))
-    fig1.add_trace(go.Scatter(x=df_view.index, y=rm24, mode="lines", name="RM 24h", line=dict(width=2, color="blue")))
-    fig1.add_trace(go.Scatter(x=df_view.index, y=rm168, mode="lines", name="RM 7d", line=dict(width=2, dash="dot")))
-
-    hol_days = sorted(set(df_view.index.date[df_view["is_hol"]])) if show_holidays else []
-    for d in hol_days:
-        x0 = pd.Timestamp(d, tz=TIMEZONE)
-        fig1.add_vrect(x0=x0, x1=x0 + pd.Timedelta(days=1), fillcolor="green", opacity=0.2, line_width=0, layer="below")
-
-    fig1.update_layout(title="Serie + Rolling Means + Feiertage", height=380, hovermode="x unified", margin=dict(l=40, r=20, t=60, b=30))
-    fig1.update_yaxes(title_text="Verbrauch MWh")
-    st.plotly_chart(fig1, width="stretch")
+    st.plotly_chart(eda_trend_chart(df_view, show_holidays=show_holidays), width="stretch")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        prof = df_view.dropna(subset=["y"]).groupby("h_w")["y"].mean().reindex(range(168))
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=prof.index, y=prof.values, mode="lines", name="Aktuell"))
-        if compare_prev and not df_prev.empty:
-            prof_prev = df_prev.dropna(subset=["y"]).groupby("h_w")["y"].mean().reindex(range(168))
-            fig2.add_trace(go.Scatter(x=prof_prev.index, y=prof_prev.values, mode="lines", name="Vorjahr (selber Zeitraum)", line=dict(dash="dash")))
-        fig2.update_layout(title="Mittelwert je Stunde der Woche (0..167)", height=320, margin=dict(l=40, r=20, t=60, b=30), hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
-        fig2.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig2, width="stretch")
+        st.plotly_chart(eda_week_profile_chart(df_view, df_prev, compare_prev), width="stretch")
 
     with col2:
-        dow_mean = df_view.dropna(subset=["y"]).groupby("dow")["y"].mean().reindex(range(7))
-        dow_names = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
-        fig3 = go.Figure()
-        fig3.add_trace(go.Bar(x=dow_names, y=dow_mean.values, name="Aktuell", offsetgroup=0))
-        if compare_prev and not df_prev.empty:
-            dow_prev = df_prev.dropna(subset=["y"]).groupby("dow")["y"].mean().reindex(range(7))
-            fig3.add_trace(go.Bar(x=dow_names, y=dow_prev.values, name="Vorjahr", offsetgroup=1))
-        fig3.update_layout(title="Mittelwert je Wochentag", barmode="group", height=320, margin=dict(l=40, r=20, t=60, b=30))
-        fig3.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig3, width="stretch")
+        st.plotly_chart(eda_weekday_chart(df_view, df_prev, compare_prev), width="stretch")
 
     with col3:
-        month_mean = df_view.groupby("month")["y"].mean().reindex(range(1, 13))
-        month_names = ["Jan", "Feb", "Mrz", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
-        xmonths = list(range(1, 13))
-        fig4 = go.Figure()
-        fig4.add_trace(go.Scatter(x=xmonths, y=month_mean.values, fill="tozeroy", name="Aktuell", mode="lines"))
-        if compare_prev and not df_prev.empty:
-            month_prev = df_prev.groupby("month")["y"].mean().reindex(range(1, 13))
-            fig4.add_trace(go.Scatter(x=xmonths, y=month_prev.values, name="Vorjahr", mode="lines", line=dict(dash="dash")))
-        fig4.update_xaxes(tickmode="array", tickvals=xmonths, ticktext=month_names)
-        fig4.update_layout(title="Mittelwert je Monat", height=320, margin=dict(l=40, r=20, t=60, b=30))
-        fig4.update_yaxes(title_text="Verbrauch MWh je Stunde")
-        st.plotly_chart(fig4, width="stretch")
+        st.plotly_chart(eda_month_chart(df_view, df_prev, compare_prev), width="stretch")
 
 
 def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
-    show_data_quality(s)
-    st.divider()
-    st.subheader("Walk-Forward Backtesting")
-    ph = st.empty()
-    ph.info("Starte Validierung in der Sidebar")
+    st.sidebar.header("Forecast")
+    refit_days = int(st.sidebar.segmented_control("Trainingsfenster", [30, 60, 90], default=60, key="forecast_refit_days"))
 
     st.sidebar.divider()
-    st.sidebar.header("Walk-Forward Backtesting")
+    st.sidebar.header("Validierung")
     with st.sidebar.form("Forecast"):
-        win_days = st.slider("Trainingsfenster (Rolling Window)", 30, 90, 30, 5)
-        eval_days = st.number_input("Anzahl Validierungstage", 1, 60, 30, 1)
-        with_sarimax = st.checkbox("SARIMA+exog.Features testen?", value=False)
+        win_days = st.slider("Trainingsfenster Backtest", 30, 90, 30, 5)
+        eval_days = st.number_input("Validierungstage", 1, 60, 30, 1)
+        with_feature_model = st.checkbox("Feature-Modell testen", value=True)
+        with_sarimax = st.checkbox("SARIMA testen", value=False)
         submit = st.form_submit_button("Validierung starten")
+
+    st.sidebar.divider()
+    st.sidebar.header("Modellstatus")
+    q_eval_days = int(st.sidebar.segmented_control("Qualitätsfenster", [1, 2, 3], default=1, key="qcheck_days"))
+
+    st.subheader("Datenstatus")
+    show_data_quality(s)
 
     if submit:
         st.session_state["backtesting"] = True
-        ph.write("")
-        with st.spinner("Walk-Forward Backtesting Baslines..."):
+        for key in [
+            "df_base",
+            "feature_val_df",
+            "feature_val_gain",
+            "feature_val_details",
+            "last_val_df",
+            "last_val_gain",
+            "last_val_meta",
+        ]:
+            st.session_state.pop(key, None)
+        with st.spinner("Walk-Forward Backtesting Baselines..."):
             st.session_state["df_base"] = eval_baselines(s, H=24, m=24, win_days=win_days, eval_days=eval_days)
+
+        if with_feature_model:
+            with st.spinner("Walk-Forward Backtesting Feature-Modell..."):
+                df_feature, feature_gain, feature_details = eval_feature_model(
+                    s,
+                    H=24,
+                    win_days=win_days,
+                    eval_days=eval_days,
+                    step_hours=24,
+                )
+                st.session_state["feature_val_df"] = df_feature
+                st.session_state["feature_val_gain"] = feature_gain
+                st.session_state["feature_val_details"] = feature_details
 
         if with_sarimax:
             with st.spinner("Walk-Forward Backtesting SARIMA..."):
@@ -229,28 +217,8 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
                 st.session_state["last_val_gain"] = gain
                 st.session_state["last_val_meta"] = meta
 
-    if st.session_state.get("backtesting", False):
-        ph.write("")
-        st.markdown(f"**Baselines** | {eval_days} Tage Validierung")
-        st.dataframe(st.session_state["df_base"])
-        if "last_val_df" in st.session_state:
-            df_sarimax = st.session_state["last_val_df"]
-            gain = st.session_state["last_val_gain"]
-            meta = st.session_state.get("last_val_meta", {})
-        else:
-            try:
-                df_sarimax, meta, gain = load_validation_json()
-            except FileNotFoundError:
-                df_sarimax = pd.DataFrame([[1000, 2.5]], columns=["MAE", "sMAPE"])
-                gain = 5.0
-                meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90, "eval_days": 30}
-
-        st.markdown("Letzte Validierung **SARIMA + exog. Features**")
-        show_last_val(df_sarimax, gain)
-        st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | {meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | {meta.get('validated_at', '(kein Zeitstempel)')}")
-
     st.divider()
-    st.subheader("Forecast 24h ahead")
+    st.subheader("Forecast-Ausgabe")
     last_week_fc = s_naive(s, h=24, m=168)
     last_24h_fc = s_naive(s, h=24, m=24)
     hist = df.iloc[-3 * 24:]
@@ -258,8 +226,7 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
     fig5.add_trace(go.Scatter(x=last_24h_fc.index, y=last_24h_fc.values, name="naive_24h", mode="lines"))
     fig5.add_trace(go.Scatter(x=last_week_fc.index, y=last_week_fc.values, name="naive_168h", mode="lines"))
 
-    st.markdown("**SARIMA Forecast**")
-    c1, c2, c3 = st.columns([3, 2, 1])
+    c1, c2, c3 = st.columns([2, 2, 1])
     st.session_state.setdefault("filter_forecast", False)
     st.session_state.setdefault("refit", False)
     params_path, spec_path = resolve_params_spec()
@@ -270,7 +237,7 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
             st.markdown(md)
             st.download_button("⬇️ Model Card (Markdown)", md.encode("utf-8"), file_name="model_card.md", mime="text/markdown")
 
-        if st.button("⚡ Schnell-Forecast (aktualisierte Zustände, gleiche Parameter"):
+        if st.button("Schnell-Forecast"):
             with st.spinner("Forecast läuft..."):
                 st.session_state["filter_forecast"] = True
                 st.session_state["refit"] = False
@@ -288,10 +255,8 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
             fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["hi"], mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(211,211,211,0.35)", name="PI 95% (init)"))
             st.caption(f"Order {spec['order']} | Seasonal Order {spec['seasonal_order']} | Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
 
-    with c3:
-        refit_days = int(st.segmented_control("Refit Tage", [30, 60, 90], default=60))
     with c2:
-        if st.button(f"🔁 Refit {refit_days}T (Parameter neu schätzen)"):
+        if st.button(f"Refit {refit_days}T"):
             st.session_state["filter_forecast"] = False
             st.session_state["refit"] = True
             with st.spinner(f"Refit {refit_days} & Forecast..."):
@@ -306,30 +271,117 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
             fig5.add_trace(go.Scatter(x=st.session_state["pi"].index, y=st.session_state["pi"]["hi"], mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(125,125,125,0.30)", name="PI 95% (refit)"))
             st.caption(f"Order {spec['order']} | Seasonal Order {spec['seasonal_order']} | Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
 
+        if st.button("Feature-Forecast"):
+            st.session_state["filter_forecast"] = False
+            st.session_state["refit"] = False
+            with st.spinner(f"Feature-Modell {refit_days}T & Forecast..."):
+                yhat, pi = refit_predict_feature_model(s, H=24, win_days=refit_days)
+                st.session_state["feature_yhat"], st.session_state["feature_pi"] = to_local(yhat, pi)
+
+        if "feature_yhat" in st.session_state:
+            fig5.add_trace(go.Scatter(x=st.session_state["feature_yhat"].index, y=st.session_state["feature_yhat"].values, name="RF Feature-Modell", mode="lines"))
+            fig5.add_trace(go.Scatter(x=st.session_state["feature_pi"].index, y=st.session_state["feature_pi"]["lo"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
+            fig5.add_trace(go.Scatter(x=st.session_state["feature_pi"].index, y=st.session_state["feature_pi"]["hi"], mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(67,170,139,0.22)", name="RF PI 90%"))
+            st.caption("Feature-Modell: Random Forest mit Kalender-, Lag- und Rolling-Mean-Features.")
+
+    with c3:
+        spec_short = {}
+        try:
+            spec_short = json.load(open(spec_path, "r", encoding="utf-8"))
+        except Exception:
+            pass
+        kpi_card("Trainingsfenster", float(spec_short.get("win_days", refit_days)), "T", icon="⚙️")
+
     forecast_start_time = last_24h_fc.index[0]
     fig5.add_shape(type="line", x0=forecast_start_time, y0=0, x1=forecast_start_time, y1=1, yref="paper", line=dict(color="Red", width=2, dash="dash"))
     fig5.add_annotation(x=forecast_start_time, y=1.05, yref="paper", text="Forecast Start", showarrow=False, xanchor="left")
     fig5.data[0].name = "Historie"
     fig5.update_xaxes(title_text="")
-    fig5.update_yaxes(title_text="total load (MWh)")
+    fig5.update_yaxes(title_text="Netzlast (MW)")
     fig5.update_layout(hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     st.plotly_chart(fig5, width="stretch")
+
+    st.divider()
+    st.subheader("Validierung & Modellstatus")
+    if st.session_state.get("backtesting", False):
+        st.markdown(f"**Modellvergleich** | {eval_days} Tage Validierung")
+        comparison_parts = []
+        if "df_base" in st.session_state:
+            base_cmp = st.session_state["df_base"].reset_index().rename(
+                columns={"model": "model", "MAE (MW)": "MAE", "sMAPE (%)": "sMAPE"}
+            )
+            base_cmp["model_version"] = "baseline_v1"
+            comparison_parts.append(base_cmp[["model", "model_version", "MAE", "sMAPE", "MASE_168h"]])
+        if "feature_val_df" in st.session_state and not st.session_state["feature_val_df"].empty:
+            feature_cmp = st.session_state["feature_val_df"].copy()
+            comparison_parts.append(
+                feature_cmp[[
+                    "model",
+                    "model_version",
+                    "MAE",
+                    "sMAPE",
+                    "MASE_168h",
+                    "MAE_base",
+                    "Gain",
+                    "PI_coverage_pct",
+                    "PI_mean_width_MW",
+                    "folds",
+                ]]
+            )
+        if "last_val_df" in st.session_state and not st.session_state["last_val_df"].empty:
+            sarima_cmp = st.session_state["last_val_df"].copy()
+            sarima_cmp["model"] = "sarima_exog"
+            sarima_cmp["model_version"] = "sarima_exog_v1"
+            comparison_parts.append(
+                sarima_cmp[[
+                    "model",
+                    "model_version",
+                    "MAE",
+                    "sMAPE",
+                    "MASE_168h",
+                    "MAE_base",
+                    "Gain",
+                    "PI_coverage_pct",
+                    "PI_mean_width_MW",
+                    "folds",
+                ]]
+            )
+        if comparison_parts:
+            st.dataframe(pd.concat(comparison_parts, ignore_index=True), width="stretch")
+        if "feature_val_details" in st.session_state:
+            failed = st.session_state["feature_val_details"]
+            failed = failed[failed.get("error", "") != ""] if not failed.empty else failed
+            if not failed.empty:
+                st.warning(f"{len(failed)} Feature-Modell-Fold(s) fehlgeschlagen; Details sind im Ergebnis sichtbar.")
+                st.dataframe(failed[["cutoff", "expected_points", "error"]], width="stretch")
+    else:
+        st.info("Validierung über die Sidebar starten.")
+
+    if "last_val_df" in st.session_state:
+        df_sarimax = st.session_state["last_val_df"]
+        gain = st.session_state["last_val_gain"]
+        meta = st.session_state.get("last_val_meta", {})
+    else:
+        try:
+            df_sarimax, meta, gain = load_validation_json()
+        except FileNotFoundError:
+            df_sarimax = pd.DataFrame([[1000, 2.5]], columns=["MAE", "sMAPE"])
+            gain = 5.0
+            meta = {"order": "(1,0,0)", "seasonal_order": "(0,1,0,168)", "train_window_days": 90, "eval_days": 30}
+
+    st.markdown("**Letzte SARIMA-Validierung**")
+    show_last_val(df_sarimax, gain)
+    st.caption(f"order {meta.get('order')} × {meta.get('seasonal_order')} | {meta.get('train_window_days', '?')}T Train, {meta.get('eval_days', '?')}T Val | {meta.get('validated_at', '(kein Zeitstempel)')}")
 
     st.session_state.setdefault("qcheck", False)
     params_path, spec_path = resolve_params_spec()
     spec = spec if st.session_state["refit"] else json.load(open(spec_path, "r"))
 
-    st.divider()
-    st.subheader("📏 Qualitätscheck")
-    st.badge("Backtesting letzten Tage: Filter-Forecast mit aktuellen Parametern (kein Re-Fit)")
-    cols = st.columns([1, 3])
-    with cols[0]:
-        eval_days = int(st.segmented_control("Letzten Tage", [1, 2, 3], default=1))
     if st.button("Qualitätscheck starten"):
         st.session_state["qcheck"] = True
         with st.spinner("Backtesting des aktuellen Modells..."):
             st.caption(f"Trainingsfenster {spec['win_days']}T | Letzter Refit {spec['last_refit']} ")
-            kpis, gain = backtest_current_model(s, H=24, eval_days=eval_days, win_days=spec["win_days"], m=168, session_res=st.session_state.get("sarima_res"), spec_path=spec_path, params_path=params_path)
+            kpis, gain = backtest_current_model(s, H=24, eval_days=q_eval_days, win_days=spec["win_days"], m=168, session_res=st.session_state.get("sarima_res"), spec_path=spec_path, params_path=params_path)
             st.session_state["kpis"] = kpis
             st.session_state["gain"] = gain
 
@@ -350,7 +402,8 @@ def render_forecast(s: pd.Series, df: pd.DataFrame) -> None:
 
 
 def render_scenarios(s: pd.Series, min_date, max_date) -> None:
-    st.subheader("🔬 Szenario-Simulation (What-if)")
+    st.subheader("Szenario-Simulation")
+    st.caption("What-if auf Historie, getrennt vom Forecast.")
     rng = st.date_input("Historienfenster", value=(min_date, max_date), min_value=min_date, max_value=max_date)
     if isinstance(rng, tuple) and len(rng) == 2:
         start_date, end_date = rng
@@ -361,39 +414,40 @@ def render_scenarios(s: pd.Series, min_date, max_date) -> None:
     y_base = s_loc[(s_loc.index.date >= start_date) & (s_loc.index.date <= end_date)].asfreq("h")
     y_base.name = "History"
 
-    st.markdown("### 🎛️ Szenarien")
+    preset = st.selectbox("Preset", ["Manuell", "Feiertag", "Demand Response", "Effizienz", "Wetterstress", "Netto-Last"])
     col1, col2 = st.columns(2)
     with col1:
-        use_hw = st.checkbox("Feiertag/Wochenende skalieren")
-        use_shift = st.checkbox("Peak → Off-Peak verschieben")
-        use_temp = st.checkbox("Temperatur-Sensitivität")
+        use_hw = st.checkbox("Feiertag/Wochenende skalieren", value=preset == "Feiertag")
+        use_shift = st.checkbox("Peak -> Off-Peak verschieben", value=preset == "Demand Response")
+        use_temp = st.checkbox("Temperatur-Sensitivität", value=preset == "Wetterstress")
     with col2:
-        use_eff = st.checkbox("Effizienz-Trend (ab Datum)")
+        use_eff = st.checkbox("Effizienz-Trend", value=preset == "Effizienz")
         use_event = st.checkbox("Event-Tag(e) skalieren")
+        use_net = st.checkbox("Netto-Last PV/Wind", value=preset == "Netto-Last")
 
     y_scn = y_base.copy()
     holidays_in_range = set()
     if use_hw:
-        hol_mult = st.slider("Feiertags-Multiplikator", 0.6, 1.2, 0.9, 0.01)
-        we_mult = st.slider("Wochenend-Multiplikator", 0.6, 1.2, 0.95, 0.01)
+        hol_mult = st.slider("Feiertags-Multiplikator", 0.6, 1.2, 0.88 if preset == "Feiertag" else 0.9, 0.01)
+        we_mult = st.slider("Wochenend-Multiplikator", 0.6, 1.2, 0.94 if preset == "Feiertag" else 0.95, 0.01)
         years = range(int(y_scn.index.year.min()), int(y_scn.index.year.max()) + 1)
         holidays_in_range = set(Germany(years=years).keys()) & set(y_scn.index.date)
         y_scn = mult_holiday_weekend(y_scn, holidays_in_range, hol_mult, we_mult)
 
     if use_shift:
-        frac = st.slider("Verschiebe-Anteil", 0.0, 0.5, 0.1, 0.01)
+        frac = st.slider("Verschiebe-Anteil", 0.0, 0.5, 0.12 if preset == "Demand Response" else 0.1, 0.01)
         src = st.multiselect("Peak-Stunden (Quelle)", list(range(24)), default=[18, 19, 20, 21])
         dst = st.multiselect("Off-Peak-Stunden (Ziel)", list(range(24)), default=[2, 3, 4, 5])
         y_scn = shift_load(y_scn, frac, src, dst)
 
     if use_temp:
-        delta = st.slider("Δ Temperatur vs. Referenz (°C)", -10, 10, 0)
+        delta = st.slider("Delta Temperatur vs. Referenz (C)", -10, 10, -5 if preset == "Wetterstress" else 0)
         kpc = st.slider("Sensitivität (%/°C)", 0.0, 5.0, 1.5, 0.1) / 100.0
         y_scn = temp_adjust(y_scn, delta, kpc, mode="multiplicative")
 
     if use_eff:
         start = st.date_input("Effizienz ab", value=pd.to_datetime(y_scn.index.min()).date())
-        rate = st.slider("Jährliche Änderung (%)", -10.0, 10.0, -1.0, 0.1) / 100.0
+        rate = st.slider("Jährliche Änderung (%)", -10.0, 10.0, -2.0 if preset == "Effizienz" else -1.0, 0.1) / 100.0
         y_scn = efficiency_trend(y_scn, start, rate)
 
     if use_event:
@@ -403,33 +457,60 @@ def render_scenarios(s: pd.Series, min_date, max_date) -> None:
         if dlist:
             y_scn = event_days(y_scn, dlist, mult)
 
+    if use_net:
+        pv_mw = st.slider("PV-Abzug MW", 0, 20000, 6000 if preset == "Netto-Last" else 0, 250)
+        wind_mw = st.slider("Wind-Abzug MW", 0, 20000, 4000 if preset == "Netto-Last" else 0, 250)
+        y_scn = apply_net_load(y_scn, pv_mw=pv_mw, wind_mw=wind_mw)
+
     c1, c2 = st.columns(2)
     with c1:
-        kpi_card("Δ Peak (vs. Base)", float(y_scn.max() - y_base.max()), unit="MWh", icon="⚡", footnote="Negativ = Peak-Reduktion")
+        kpi_card("Delta Peak", float(y_scn.max() - y_base.max()), unit="MW", icon="⚡", footnote="vs. Historie")
     with c2:
-        kpi_card("Δ Energie (Szenario − Base)", float((y_scn - y_base).sum()), unit="MWh", icon="📉", footnote="1h-Auflösung → Summe=MWh")
+        kpi_card("Delta Energie", float((y_scn - y_base).sum()), unit="MWh", icon="📉", footnote="1h-Auflösung")
 
     fig6 = go.Figure()
-    fig6.add_trace(go.Scatter(x=y_base.index, y=y_base, mode="lines", name=y_base.name))
-    fig6.add_trace(go.Scatter(x=y_scn.index, y=y_scn, mode="lines", name="Scenario"))
+    fig6.add_trace(go.Scatter(x=y_base.index, y=y_base, mode="lines", name="Historie"))
+    fig6.add_trace(go.Scatter(x=y_scn.index, y=y_scn, mode="lines", name="Simulation"))
     if use_hw:
         for d in holidays_in_range:
             x0 = pd.Timestamp(d, tz=TIMEZONE)
             fig6.add_vrect(x0=x0, x1=x0 + pd.Timedelta(days=1), fillcolor="green", opacity=0.2, line_width=0, layer="below")
-    fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="MWh", legend=dict(orientation="h", y=1.1))
+    fig6.update_layout(margin=dict(l=40, r=20, t=30, b=20), xaxis_title="", yaxis_title="Netzlast (MW)", legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig6, width="stretch")
 
 
 def render_ops() -> None:
-    st.subheader("📈 Ops / Monitoring")
-    st.caption("MAE/sMAPE der letzten Forecast-Läufe (aus artifacts/metrics.csv)")
+    st.subheader("Ops / Monitoring")
 
     if not Path(METRICS_CSV).exists():
         st.info("Noch keine Metriken vorhanden. CI-Job 'metrics_job.py' täglich ausführen, um zu befüllen.")
         return
 
     m = pd.read_csv(METRICS_CSV, parse_dates=["forecast_issue", "scored_at"]).sort_values("forecast_issue")
-    st.dataframe(m.tail(7), use_container_width=True)
+    if m.empty:
+        st.info("metrics.csv ist vorhanden, enthält aber noch keine Zeilen.")
+        return
+
+    for col in ["MAE", "sMAPE", "Gain", "coverage_pct", "points_compared", "PI_coverage_pct", "PI_mean_width_MW"]:
+        if col in m.columns:
+            m[col] = pd.to_numeric(m[col], errors="coerce")
+
+    latest = m.tail(1).iloc[0]
+    valid = m.dropna(subset=["MAE", "sMAPE"])
+    ma_7d = valid.tail(7).mean(numeric_only=True) if not valid.empty else pd.Series(dtype=float)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        kpi_card_value("Letzter Forecast", str(latest.get("forecast_issue", "n/a")), icon="🕑")
+    with c2:
+        kpi_card("MAE 7d", float(ma_7d.get("MAE", np.nan)), "MW", icon="📉")
+    with c3:
+        kpi_card("Gain 7d", float(ma_7d.get("Gain", np.nan)), "%", icon="✅")
+    with c4:
+        kpi_card_value("Coverage zuletzt", f"{float(latest.get('coverage_pct', np.nan)):.1f}%" if pd.notna(latest.get("coverage_pct", np.nan)) else "n/a", icon="🔎")
+
+    st.dataframe(m.tail(14), width="stretch")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         fig = px.area(m, x="forecast_issue", y="sMAPE")
@@ -451,7 +532,7 @@ def render_ops() -> None:
         if last.empty:
             st.info("Kein 'Gain' vorhanden (noch keine Bewertung).")
             return
-        gain = float(m["Gain"].rolling(7, min_periods=3).mean().values[-1])
+        gain = float(m["Gain"].rolling(7, min_periods=3).mean().dropna().tail(1).iloc[0]) if m["Gain"].rolling(7, min_periods=3).mean().notna().any() else float(last["Gain"].iloc[0])
         gauge = go.Figure(go.Indicator(
             mode="gauge+number+delta",
             value=gain,
@@ -477,25 +558,50 @@ def render_ops() -> None:
         else:
             st.success(f"🟢 Gain {gain:.1f}% — ok (≥10%)")
 
+    interval_cols = [c for c in ["PI_coverage_pct", "PI_mean_width_MW", "PI_calibration_error_pct"] if c in m.columns]
+    if interval_cols:
+        st.markdown("**Intervalle**")
+        st.dataframe(m[["forecast_issue", *interval_cols]].tail(14), width="stretch")
+
+    forecast_dir = Path("artifacts/forecasts")
+    if forecast_dir.exists():
+        files = sorted(forecast_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+        st.markdown("**Forecast-Artefakte**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "file": f.name,
+                        "modified": pd.Timestamp.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        "size_kb": round(f.stat().st_size / 1024, 1),
+                    }
+                    for f in files
+                ]
+            ),
+            width="stretch",
+        )
+
 
 def main() -> None:
     st.set_page_config(layout="wide")
     s = load_app_data(years=2)
     df = prepare_eda_frame(s)
-    show_holidays, compare_prev, start_date, end_date, df_view, df_prev, prev_info = read_sidebar_filters(df)
 
-    st.title("⚡ Stromverbrauch Deutschland")
-    home_tab, eda_tab, forecast_tab, ops_tab, scenarios_tab = st.tabs(["Home", "EDA", "Forecast", "Ops", "Szenarien"])
+    st.sidebar.title("Stromlast DE")
+    page = st.sidebar.radio("Bereich", ["Forecast", "Ops", "EDA", "Szenarien", "Home"], index=0)
 
-    with home_tab:
+    st.title("Stromverbrauch Deutschland")
+
+    if page == "Home":
         render_home()
-    with eda_tab:
+    elif page == "EDA":
+        show_holidays, compare_prev, start_date, end_date, df_view, df_prev, prev_info = read_sidebar_filters(df)
         render_eda(df_view, df_prev, start_date, end_date, prev_info, show_holidays, compare_prev)
-    with forecast_tab:
+    elif page == "Forecast":
         render_forecast(s, df)
-    with ops_tab:
+    elif page == "Ops":
         render_ops()
-    with scenarios_tab:
+    elif page == "Szenarien":
         render_scenarios(s, df.index.date.min(), df.index.date.max())
 
 
